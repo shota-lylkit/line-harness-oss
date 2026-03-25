@@ -139,13 +139,51 @@ webhooks.delete('/api/webhooks/outgoing/:id', async (c) => {
 
 // ========== 受信Webhookエンドポイント (外部システムからの受信) ==========
 
+// HMAC-SHA256 signature verification for incoming webhooks
+async function verifyWebhookSignature(secret: string, rawBody: string, signature: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(rawBody));
+  const expected = Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  // Constant-time-ish comparison (both are hex strings of same length)
+  if (expected.length !== signature.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < expected.length; i++) {
+    mismatch |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 webhooks.post('/api/webhooks/incoming/:id/receive', async (c) => {
   try {
     const id = c.req.param('id');
     const wh = await getIncomingWebhookById(c.env.DB, id);
     if (!wh || !wh.is_active) return c.json({ success: false, error: 'Webhook not found or inactive' }, 404);
 
-    const body = await c.req.json();
+    // Signature verification: if the webhook has a secret configured, require a valid signature
+    let body: unknown;
+    if (wh.secret) {
+      const rawBody = await c.req.text();
+      const signature = c.req.header('X-Webhook-Signature') ?? '';
+      if (!signature) {
+        return c.json({ success: false, error: 'Missing X-Webhook-Signature header' }, 401);
+      }
+      const valid = await verifyWebhookSignature(wh.secret, rawBody, signature);
+      if (!valid) {
+        return c.json({ success: false, error: 'Invalid signature' }, 401);
+      }
+      body = JSON.parse(rawBody);
+    } else {
+      body = await c.req.json();
+    }
 
     // イベントバスに発火: source_type をイベントタイプとして使用
     const { fireEvent } = await import('../services/event-bus.js');

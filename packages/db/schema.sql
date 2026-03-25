@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS friends (
   is_following     INTEGER NOT NULL DEFAULT 1,
   user_id          TEXT,
   score            INTEGER NOT NULL DEFAULT 0,
+  ref_code         TEXT,
+  metadata         TEXT NOT NULL DEFAULT '{}',
+  line_account_id  TEXT REFERENCES line_accounts(id),
   created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
@@ -52,6 +55,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
   trigger_type    TEXT NOT NULL CHECK (trigger_type IN ('friend_add', 'tag_added', 'manual')),
   trigger_tag_id  TEXT REFERENCES tags (id) ON DELETE SET NULL,
   is_active       INTEGER NOT NULL DEFAULT 1,
+  line_account_id TEXT,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
@@ -66,6 +70,9 @@ CREATE TABLE IF NOT EXISTS scenario_steps (
   delay_minutes   INTEGER NOT NULL DEFAULT 0,
   message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex')),
   message_content TEXT NOT NULL,
+  condition_type  TEXT,
+  condition_value TEXT,
+  next_step_on_false INTEGER,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   UNIQUE (scenario_id, step_order)
 );
@@ -105,6 +112,7 @@ CREATE TABLE IF NOT EXISTS broadcasts (
   sent_at         TEXT,
   total_count     INTEGER NOT NULL DEFAULT 0,
   success_count   INTEGER NOT NULL DEFAULT 0,
+  line_account_id TEXT,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 
@@ -151,6 +159,88 @@ CREATE TABLE IF NOT EXISTS admin_users (
 );
 
 -- ============================================================
+-- Entry Routes (ref code tracking)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS entry_routes (
+  id           TEXT PRIMARY KEY,
+  ref_code     TEXT UNIQUE NOT NULL,
+  name         TEXT NOT NULL,
+  tag_id       TEXT REFERENCES tags (id) ON DELETE SET NULL,
+  scenario_id  TEXT REFERENCES scenarios (id) ON DELETE SET NULL,
+  redirect_url TEXT,
+  is_active    INTEGER NOT NULL DEFAULT 1,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_entry_routes_ref ON entry_routes (ref_code);
+
+CREATE TABLE IF NOT EXISTS ref_tracking (
+  id              TEXT PRIMARY KEY,
+  ref_code        TEXT NOT NULL,
+  friend_id       TEXT REFERENCES friends (id) ON DELETE CASCADE,
+  entry_route_id  TEXT REFERENCES entry_routes (id) ON DELETE SET NULL,
+  source_url      TEXT,
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_ref_tracking_ref    ON ref_tracking (ref_code);
+CREATE INDEX IF NOT EXISTS idx_ref_tracking_friend ON ref_tracking (friend_id);
+
+-- ============================================================
+-- Tracked Links (click tracking)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tracked_links (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  original_url TEXT NOT NULL,
+  tag_id       TEXT REFERENCES tags (id) ON DELETE SET NULL,
+  scenario_id  TEXT REFERENCES scenarios (id) ON DELETE SET NULL,
+  is_active    INTEGER NOT NULL DEFAULT 1,
+  click_count  INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
+CREATE TABLE IF NOT EXISTS link_clicks (
+  id              TEXT PRIMARY KEY,
+  tracked_link_id TEXT NOT NULL REFERENCES tracked_links (id) ON DELETE CASCADE,
+  friend_id       TEXT REFERENCES friends (id) ON DELETE SET NULL,
+  clicked_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_link_clicks_link   ON link_clicks (tracked_link_id);
+CREATE INDEX IF NOT EXISTS idx_link_clicks_friend ON link_clicks (friend_id);
+
+-- ============================================================
+-- Forms
+-- ============================================================
+CREATE TABLE IF NOT EXISTS forms (
+  id                    TEXT PRIMARY KEY,
+  name                  TEXT NOT NULL,
+  description           TEXT,
+  fields                TEXT NOT NULL DEFAULT '[]',
+  on_submit_tag_id      TEXT REFERENCES tags (id) ON DELETE SET NULL,
+  on_submit_scenario_id TEXT REFERENCES scenarios (id) ON DELETE SET NULL,
+  save_to_metadata      INTEGER NOT NULL DEFAULT 1,
+  is_active             INTEGER NOT NULL DEFAULT 1,
+  submit_count          INTEGER NOT NULL DEFAULT 0,
+  created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
+CREATE TABLE IF NOT EXISTS form_submissions (
+  id         TEXT PRIMARY KEY,
+  form_id    TEXT NOT NULL REFERENCES forms (id) ON DELETE CASCADE,
+  friend_id  TEXT REFERENCES friends (id) ON DELETE SET NULL,
+  data       TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_form_submissions_form   ON form_submissions (form_id);
+CREATE INDEX IF NOT EXISTS idx_form_submissions_friend ON form_submissions (friend_id);
+
+-- ============================================================
 -- Round 2: Internal UUID Users (Cross-Account)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
@@ -177,6 +267,10 @@ CREATE TABLE IF NOT EXISTS line_accounts (
   channel_access_token TEXT NOT NULL,
   channel_secret       TEXT NOT NULL,
   is_active            INTEGER NOT NULL DEFAULT 1,
+  login_channel_id     TEXT,
+  login_channel_secret TEXT,
+  liff_id              TEXT,
+  token_expires_at     TEXT,
   created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
@@ -294,12 +388,13 @@ CREATE INDEX IF NOT EXISTS idx_calendar_bookings_start ON calendar_bookings (sta
 -- Round 3: リマインダ配信
 -- ============================================================
 CREATE TABLE IF NOT EXISTS reminders (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,
-  description TEXT,
-  is_active   INTEGER NOT NULL DEFAULT 1,
-  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
-  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  description     TEXT,
+  is_active       INTEGER NOT NULL DEFAULT 1,
+  line_account_id TEXT,
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 
 CREATE TABLE IF NOT EXISTS reminder_steps (
@@ -388,14 +483,15 @@ CREATE TABLE IF NOT EXISTS operators (
 );
 
 CREATE TABLE IF NOT EXISTS chats (
-  id            TEXT PRIMARY KEY,
-  friend_id     TEXT NOT NULL REFERENCES friends (id) ON DELETE CASCADE,
-  operator_id   TEXT REFERENCES operators (id) ON DELETE SET NULL,
-  status        TEXT NOT NULL DEFAULT 'unread' CHECK (status IN ('unread', 'in_progress', 'resolved')),
-  notes         TEXT,
+  id              TEXT PRIMARY KEY,
+  friend_id       TEXT NOT NULL REFERENCES friends (id) ON DELETE CASCADE,
+  operator_id     TEXT REFERENCES operators (id) ON DELETE SET NULL,
+  status          TEXT NOT NULL DEFAULT 'unread' CHECK (status IN ('unread', 'in_progress', 'resolved')),
+  notes           TEXT,
   last_message_at TEXT,
-  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
-  updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+  line_account_id TEXT,
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_chats_friend ON chats (friend_id);
@@ -482,12 +578,13 @@ CREATE TABLE IF NOT EXISTS automations (
   name        TEXT NOT NULL,
   description TEXT,
   event_type  TEXT NOT NULL,
-  conditions  TEXT NOT NULL DEFAULT '{}',
-  actions     TEXT NOT NULL DEFAULT '[]',
-  is_active   INTEGER NOT NULL DEFAULT 1,
-  priority    INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
-  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+  conditions      TEXT NOT NULL DEFAULT '{}',
+  actions         TEXT NOT NULL DEFAULT '[]',
+  is_active       INTEGER NOT NULL DEFAULT 1,
+  priority        INTEGER NOT NULL DEFAULT 0,
+  line_account_id TEXT,
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_automations_event ON automations (event_type);
