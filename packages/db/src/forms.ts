@@ -164,19 +164,18 @@ export async function createFormSubmission(
   const id = crypto.randomUUID();
   const now = jstNow();
 
-  await db
-    .prepare(
-      `INSERT INTO form_submissions (id, form_id, friend_id, data, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .bind(id, input.formId, input.friendId ?? null, input.data, now)
-    .run();
-
-  // Increment submit_count
-  await db
-    .prepare(`UPDATE forms SET submit_count = submit_count + 1, updated_at = ? WHERE id = ?`)
-    .bind(now, input.formId)
-    .run();
+  // Batch both writes atomically to prevent partial-write inconsistency
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO form_submissions (id, form_id, friend_id, data, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(id, input.formId, input.friendId ?? null, input.data, now),
+    db
+      .prepare(`UPDATE forms SET submit_count = submit_count + 1, updated_at = ? WHERE id = ?`)
+      .bind(now, input.formId),
+  ]);
 
   return (await db
     .prepare(`SELECT * FROM form_submissions WHERE id = ?`)

@@ -47,8 +47,10 @@ function serializeTag(row: DbTag) {
 // GET /api/friends - list with pagination
 friends.get('/api/friends', async (c) => {
   try {
-    const limit = Number(c.req.query('limit') ?? '50');
-    const offset = Number(c.req.query('offset') ?? '0');
+    const rawLimit = Number(c.req.query('limit') ?? '50');
+    const rawOffset = Number(c.req.query('offset') ?? '0');
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 200)) : 50;
+    const offset = Number.isFinite(rawOffset) ? Math.max(0, rawOffset) : 0;
     const tagId = c.req.query('tagId');
     const lineAccountId = c.req.query('lineAccountId');
 

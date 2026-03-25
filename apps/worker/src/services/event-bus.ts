@@ -27,6 +27,16 @@ interface EventPayload {
   eventData?: Record<string, unknown>;
 }
 
+/** Validate webhook URL to prevent SSRF — only allow https */
+function isAllowedWebhookUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * イベントを発火し、登録された全ハンドラーを実行
  */
@@ -54,6 +64,10 @@ async function fireOutgoingWebhooks(
   try {
     const webhooks = await getActiveOutgoingWebhooksByEvent(db, eventType);
     for (const wh of webhooks) {
+      if (!isAllowedWebhookUrl(wh.url)) {
+        console.warn(`送信Webhook ${wh.id}: URL blocked (non-https): ${wh.url}`);
+        continue;
+      }
       try {
         const body = JSON.stringify({
           event: eventType,
@@ -120,8 +134,19 @@ async function processAutomations(
     );
 
     for (const automation of automations) {
-      const conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
-      const actions = JSON.parse(automation.actions) as Array<{ type: string; params: Record<string, string> }>;
+      let conditions: Record<string, unknown>;
+      let actions: Array<{ type: string; params: Record<string, string> }>;
+      try {
+        conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
+        actions = JSON.parse(automation.actions) as Array<{ type: string; params: Record<string, string> }>;
+      } catch (parseErr) {
+        console.error(`Automation ${automation.id}: invalid JSON in conditions/actions, skipping`, parseErr);
+        continue;
+      }
+      if (!Array.isArray(actions)) {
+        console.error(`Automation ${automation.id}: actions is not an array, skipping`);
+        continue;
+      }
 
       // 条件チェック（簡易版: 条件が空なら常にマッチ）
       if (!matchConditions(conditions, payload)) continue;
@@ -234,7 +259,7 @@ async function executeAction(
 
     case 'send_webhook': {
       const url = action.params.url;
-      if (url) {
+      if (url && isAllowedWebhookUrl(url)) {
         await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
