@@ -23,11 +23,18 @@ function serializeLineAccount(row: DbLineAccount) {
   };
 }
 
+function maskSecret(value: string): string {
+  if (value.length <= 8) return '••••••••';
+  return value.slice(0, 4) + '••••' + value.slice(-4);
+}
+
 function serializeLineAccountFull(row: DbLineAccount) {
   return {
     ...serializeLineAccount(row),
-    channelAccessToken: row.channel_access_token,
-    channelSecret: row.channel_secret,
+    channelAccessToken: maskSecret(row.channel_access_token),
+    channelSecret: maskSecret(row.channel_secret),
+    hasAccessToken: Boolean(row.channel_access_token),
+    hasSecret: Boolean(row.channel_secret),
   };
 }
 

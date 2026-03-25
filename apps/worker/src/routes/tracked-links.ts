@@ -13,6 +13,32 @@ import type { Env } from '../index.js';
 
 const trackedLinks = new Hono<Env>();
 
+// Generate HMAC-SHA256 hex signature for tracked-link friend identification
+async function signFriendId(secret: string, linkId: string, friendId: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(`${linkId}:${friendId}`));
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function verifyFriendSig(secret: string, linkId: string, friendId: string, signature: string): Promise<boolean> {
+  const expected = await signFriendId(secret, linkId, friendId);
+  if (expected.length !== signature.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < expected.length; i++) {
+    mismatch |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 function serializeTrackedLink(row: TrackedLink, baseUrl: string) {
   return {
     id: row.id,
@@ -119,9 +145,11 @@ trackedLinks.delete('/api/tracked-links/:id', async (c) => {
 });
 
 // GET /t/:linkId — click tracking redirect (no auth, fast redirect)
+// Side-effects (tag/scenario) only run when friendId is verified via HMAC signature
 trackedLinks.get('/t/:linkId', async (c) => {
   const linkId = c.req.param('linkId');
   const friendId = c.req.query('f') ?? null;
+  const sig = c.req.query('sig') ?? null;
 
   // Look up the link first
   const link = await getTrackedLinkById(c.env.DB, linkId);
@@ -130,24 +158,34 @@ trackedLinks.get('/t/:linkId', async (c) => {
     return c.json({ success: false, error: 'Link not found' }, 404);
   }
 
+  // Verify friendId signature — only trusted callers (the system itself) can trigger side-effects
+  let verifiedFriendId: string | null = null;
+  if (friendId && sig) {
+    const apiKey = c.env.API_KEY;
+    if (apiKey && await verifyFriendSig(apiKey, linkId, friendId, sig)) {
+      verifiedFriendId = friendId;
+    }
+    // If sig is invalid, still redirect but skip side-effects (treat as anonymous click)
+  }
+
   // Redirect immediately, run side-effects async
   const ctx = c.executionCtx as ExecutionContext;
   ctx.waitUntil(
     (async () => {
       try {
-        // Record the click
-        await recordLinkClick(c.env.DB, linkId, friendId);
+        // Record the click (anonymous clicks are still tracked)
+        await recordLinkClick(c.env.DB, linkId, verifiedFriendId);
 
-        // Run automatic actions if a friend is identified
-        if (friendId) {
+        // Run automatic actions only for verified friends
+        if (verifiedFriendId) {
           const actions: Promise<unknown>[] = [];
 
           if (link.tag_id) {
-            actions.push(addTagToFriend(c.env.DB, friendId, link.tag_id));
+            actions.push(addTagToFriend(c.env.DB, verifiedFriendId, link.tag_id));
           }
 
           if (link.scenario_id) {
-            actions.push(enrollFriendInScenario(c.env.DB, friendId, link.scenario_id));
+            actions.push(enrollFriendInScenario(c.env.DB, verifiedFriendId, link.scenario_id));
           }
 
           if (actions.length > 0) {
