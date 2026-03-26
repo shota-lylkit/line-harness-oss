@@ -16,6 +16,10 @@
 
 import { initBooking } from './booking.js';
 import { initForm } from './form.js';
+import { initJobs } from './jobs.js';
+import { initAdmin } from './admin.js';
+import { initMypage } from './mypage.js';
+import { initCheckin } from './checkin.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -55,6 +59,10 @@ function apiCall(path: string, options?: RequestInit): Promise<Response> {
 function getPage(): string | null {
   const path = window.location.pathname.replace(/^\/+/, '');
   if (path === 'book') return 'book';
+  if (path === 'jobs') return 'jobs';
+  if (path === 'mypage') return 'mypage';
+  if (path === 'checkin') return 'checkin';
+  if (path === 'admin') return 'admin';
   const params = new URLSearchParams(window.location.search);
   return params.get('page');
 }
@@ -153,7 +161,9 @@ function showCompletion(profile: { displayName: string; pictureUrl?: string }, i
   // 2秒後にトーク画面に遷移
   setTimeout(() => {
     // LINE内でもブラウザでも、トーク画面URLに遷移
-    window.location.href = 'https://line.me/R/oaMessage/@086cdqiw/';
+    if (BOT_BASIC_ID) {
+      window.location.href = `https://line.me/R/oaMessage/${BOT_BASIC_ID}/`;
+    }
   }, 2000);
 }
 
@@ -194,9 +204,12 @@ async function linkAndAddFlow() {
       }),
     }).then(async (res) => {
       if (res.ok) {
-        const data = await res.json() as { success: boolean; data?: { userId?: string } };
+        const data = await res.json() as { success: boolean; data?: { userId?: string; friendId?: string } };
         if (data?.data?.userId) {
           saveUuid(data.data.userId);
+        }
+        if (data?.data?.friendId) {
+          try { localStorage.setItem('lh_friend_id', data.data.friendId); } catch { /* silent */ }
         }
       }
       return res;
@@ -246,6 +259,13 @@ async function linkAndAddFlow() {
 // ─── Entry Point ────────────────────────────────────────
 
 async function main() {
+  // Admin page doesn't need LIFF — direct browser access
+  const page = getPage();
+  if (page === 'admin') {
+    await initAdmin();
+    return;
+  }
+
   try {
     await liff.init({ liffId: LIFF_ID });
 
@@ -254,8 +274,13 @@ async function main() {
       return;
     }
 
-    const page = getPage();
-    if (page === 'book') {
+    if (page === 'jobs') {
+      await initJobs();
+    } else if (page === 'mypage') {
+      await initMypage();
+    } else if (page === 'checkin') {
+      await initCheckin();
+    } else if (page === 'book') {
       await initBooking();
     } else if (page === 'form') {
       const params = new URLSearchParams(window.location.search);

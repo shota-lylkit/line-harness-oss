@@ -6,6 +6,7 @@ import { processStepDeliveries } from './services/step-delivery.js';
 import { processScheduledBroadcasts } from './services/broadcast.js';
 import { processReminderDeliveries } from './services/reminder-delivery.js';
 import { checkAccountHealth } from './services/ban-monitor.js';
+import { processJobReminders } from './services/job-reminders.js';
 import { authMiddleware } from './middleware/auth.js';
 import { webhook } from './routes/webhook.js';
 import { friends } from './routes/friends.js';
@@ -32,6 +33,10 @@ import { automations } from './routes/automations.js';
 import { richMenus } from './routes/rich-menus.js';
 import { trackedLinks } from './routes/tracked-links.js';
 import { forms } from './routes/forms.js';
+import { jobs } from './routes/jobs.js';
+import { profiles } from './routes/profiles.js';
+import { attendance } from './routes/attendance.js';
+import { reviews } from './routes/reviews.js';
 
 export type Env = {
   Bindings: {
@@ -44,13 +49,33 @@ export type Env = {
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
     WORKER_URL: string;
+    ADMIN_LINE_USER_ID?: string;
+    DOCUMENTS: R2Bucket;
   };
 };
 
 const app = new Hono<Env>();
 
-// CORS — allow all origins for MVP
-app.use('*', cors({ origin: '*' }));
+// CORS — restrict to known origins
+app.use('*', cors({
+  origin: (origin, c) => {
+    const liffUrl = c.env.LIFF_URL || '';
+    const workerUrl = c.env.WORKER_URL || '';
+    const allowed = [
+      liffUrl,
+      workerUrl,
+      // LINE LIFF SDK loads from these origins
+      'https://liff.line.me',
+    ].filter(Boolean);
+    // Allow if origin matches any allowed origin (strip trailing slash)
+    if (origin && allowed.some((a) => origin.replace(/\/$/, '') === a.replace(/\/$/, ''))) {
+      return origin;
+    }
+    // Allow requests with no origin (server-to-server, CLI, webhook)
+    if (!origin) return liffUrl || '*';
+    return null as unknown as string;
+  },
+}));
 
 // Auth middleware — skips /webhook and /docs automatically
 app.use('*', authMiddleware);
@@ -82,6 +107,10 @@ app.route('/', automations);
 app.route('/', richMenus);
 app.route('/', trackedLinks);
 app.route('/', forms);
+app.route('/', jobs);
+app.route('/', profiles);
+app.route('/', attendance);
+app.route('/', reviews);
 
 // Short link: /r/:ref → landing page with LINE open button
 app.get('/r/:ref', (c) => {
@@ -148,11 +177,66 @@ async function scheduled(
       processStepDeliveries(env.DB, lineClient, env.WORKER_URL),
       processScheduledBroadcasts(env.DB, lineClient),
       processReminderDeliveries(env.DB, lineClient),
+      processJobReminders(env.DB, lineClient),
     );
   }
-  jobs.push(checkAccountHealth(env.DB));
+  jobs.push(checkAccountHealth(env.DB, {
+    adminLineUserId: env.ADMIN_LINE_USER_ID,
+    lineAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN,
+  }));
 
-  await Promise.allSettled(jobs);
+  // Daily backup — run once per day at the first cron execution after 2:00 AM JST
+  const r2 = (env as unknown as { DOCUMENTS?: R2Bucket }).DOCUMENTS;
+  if (r2) {
+    const jstHour = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCHours();
+    if (jstHour === 2) {
+      jobs.push(runD1Backup(env.DB, r2));
+    }
+  }
+
+  const results = await Promise.allSettled(jobs);
+  const failures = results
+    .map((r, i) => (r.status === 'rejected' ? { index: i, reason: r.reason } : null))
+    .filter(Boolean);
+
+  if (failures.length > 0) {
+    console.error(`Cron: ${failures.length}/${results.length} jobs failed:`,
+      failures.map(f => `[${f!.index}] ${f!.reason}`).join('; '));
+  }
+}
+
+async function runD1Backup(db: D1Database, r2: R2Bucket): Promise<void> {
+  try {
+    const tables = [
+      'friends', 'tags', 'friend_tags', 'auto_replies', 'scenarios', 'scenario_steps',
+      'friend_scenarios', 'broadcasts', 'messages_log', 'line_accounts', 'user_profiles',
+      'user_documents', 'favorite_nurseries', 'jobs', 'calendar_bookings', 'reviews',
+      'cancellation_log',
+    ];
+    const backup: Record<string, unknown[]> = {};
+
+    for (const table of tables) {
+      try {
+        const result = await db.prepare(`SELECT * FROM ${table}`).all();
+        backup[table] = result.results;
+      } catch {
+        // Table may not exist yet — skip
+        backup[table] = [];
+      }
+    }
+
+    const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const dateStr = now.toISOString().slice(0, 10);
+    const key = `backups/d1-backup-${dateStr}.json`;
+
+    await r2.put(key, JSON.stringify(backup), {
+      httpMetadata: { contentType: 'application/json' },
+    });
+
+    console.log(`D1 backup completed: ${key}`);
+  } catch (err) {
+    console.error('D1 backup failed:', err);
+  }
 }
 
 export default {
