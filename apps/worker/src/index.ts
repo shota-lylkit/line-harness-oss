@@ -4,10 +4,10 @@ import { LineClient } from '@line-crm/line-sdk';
 import { getLineAccounts } from '@line-crm/db';
 import { processStepDeliveries } from './services/step-delivery.js';
 import { processScheduledBroadcasts } from './services/broadcast.js';
-import { processReminderDeliveries } from './services/reminder-delivery.js';
 import { checkAccountHealth } from './services/ban-monitor.js';
 import { processJobReminders } from './services/job-reminders.js';
 import { authMiddleware } from './middleware/auth.js';
+import { auditMiddleware } from './middleware/audit.js';
 import { liffAuthMiddleware } from './middleware/liff-auth.js';
 import { webhook } from './routes/webhook.js';
 import { friends } from './routes/friends.js';
@@ -16,23 +16,11 @@ import { scenarios } from './routes/scenarios.js';
 import { broadcasts } from './routes/broadcasts.js';
 import { users } from './routes/users.js';
 import { lineAccounts } from './routes/line-accounts.js';
-import { conversions } from './routes/conversions.js';
-import { affiliates } from './routes/affiliates.js';
 import { openapi } from './routes/openapi.js';
 import { liffRoutes } from './routes/liff.js';
 // Round 3 ルート
-import { webhooks } from './routes/webhooks.js';
-import { calendar } from './routes/calendar.js';
-import { reminders } from './routes/reminders.js';
-import { scoring } from './routes/scoring.js';
-import { templates } from './routes/templates.js';
-import { chats } from './routes/chats.js';
 import { notifications } from './routes/notifications.js';
-import { stripe } from './routes/stripe.js';
 import { health } from './routes/health.js';
-import { automations } from './routes/automations.js';
-import { richMenus } from './routes/rich-menus.js';
-import { trackedLinks } from './routes/tracked-links.js';
 import { forms } from './routes/forms.js';
 import { jobs } from './routes/jobs.js';
 import { nurseries } from './routes/nurseries.js';
@@ -40,6 +28,7 @@ import { profiles } from './routes/profiles.js';
 import { attendance } from './routes/attendance.js';
 import { reviews } from './routes/reviews.js';
 import { payroll } from './routes/payroll.js';
+import { adminAuth } from './routes/admin-auth.js';
 
 export type Env = {
   Bindings: {
@@ -93,6 +82,9 @@ app.use('*', cors({
 // Auth middleware — skips /webhook and /docs automatically
 app.use('*', authMiddleware);
 
+// Audit middleware — logs admin write operations
+app.use('*', auditMiddleware);
+
 // LIFF auth middleware — protects LIFF-public endpoints that handle PII
 // Verifies X-LIFF-Token header and injects liffFriendId into context
 app.use('/api/profiles/*', liffAuthMiddleware);
@@ -108,6 +100,9 @@ app.use('/api/credit-score/*', liffAuthMiddleware);
 app.use('/api/payroll/*', liffAuthMiddleware);
 app.use('/api/payment-settings/*', liffAuthMiddleware);
 
+// Admin auth
+app.route('/', adminAuth);
+
 // Mount route groups — MVP & Round 2
 app.route('/', webhook);
 app.route('/', friends);
@@ -116,24 +111,12 @@ app.route('/', scenarios);
 app.route('/', broadcasts);
 app.route('/', users);
 app.route('/', lineAccounts);
-app.route('/', conversions);
-app.route('/', affiliates);
 app.route('/', openapi);
 app.route('/', liffRoutes);
 
 // Mount route groups — Round 3
-app.route('/', webhooks);
-app.route('/', calendar);
-app.route('/', reminders);
-app.route('/', scoring);
-app.route('/', templates);
-app.route('/', chats);
 app.route('/', notifications);
-app.route('/', stripe);
 app.route('/', health);
-app.route('/', automations);
-app.route('/', richMenus);
-app.route('/', trackedLinks);
 app.route('/', forms);
 app.route('/', jobs);
 app.route('/', nurseries);
@@ -206,7 +189,6 @@ async function scheduled(
     jobs.push(
       processStepDeliveries(env.DB, lineClient, env.WORKER_URL),
       processScheduledBroadcasts(env.DB, lineClient, env.WORKER_URL),
-      processReminderDeliveries(env.DB, lineClient),
       processJobReminders(env.DB, lineClient),
     );
   }

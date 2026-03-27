@@ -10,7 +10,6 @@ import {
   getScenarioSteps,
   advanceFriendScenario,
   completeFriendScenario,
-  upsertChatOnMessage,
   getLineAccounts,
   jstNow,
 } from '@line-crm/db';
@@ -221,7 +220,7 @@ async function handleEvent(
     const isAutoKeyword = autoKeywords.some(k => incomingText === k);
     const isTimeCommand = /(?:配信時間|配信|届けて|通知)[はを]?\s*\d{1,2}\s*時/.test(incomingText);
     if (!isAutoKeyword && !isTimeCommand) {
-      await upsertChatOnMessage(db, friend.id);
+      // Chat tracking removed (chats module not used in spot-hoiku)
     }
 
     // 配信時間設定: 「配信時間は○時」「○時に届けて」等のパターンを検出

@@ -1,29 +1,26 @@
 import type { Context, Next } from 'hono';
 import type { Env } from '../index.js';
+import { verifyJwt } from './jwt.js';
 
 export async function authMiddleware(c: Context<Env>, next: Next): Promise<Response | void> {
-  // Skip auth for the LINE webhook endpoint — it uses signature verification instead
-  // Skip auth for OpenAPI docs — public documentation
+  // Skip auth for public endpoints
   const path = new URL(c.req.url).pathname;
   if (
     path === '/webhook' ||
     path === '/docs' ||
     path === '/openapi.json' ||
-    path === '/api/affiliates/click' ||
-    path.startsWith('/t/') ||
     path.startsWith('/r/') ||
     path.startsWith('/api/liff/') ||
     path.startsWith('/auth/') ||
-    (path === '/api/integrations/google-calendar/slots' && c.req.method === 'GET') ||
-    (path === '/api/integrations/google-calendar/book' && c.req.method === 'POST') ||
-    path === '/api/integrations/stripe/webhook' ||
-    path.match(/^\/api\/webhooks\/incoming\/[^/]+\/receive$/) ||
     path.match(/^\/api\/forms\/[^/]+\/submit$/) ||
     path.match(/^\/api\/forms\/[^/]+$/) || // GET form definition (public for LIFF)
     (path === '/api/jobs' && c.req.method === 'GET') ||
     (path.match(/^\/api\/jobs\/[^/]+$/) && c.req.method === 'GET') ||
+    // Nurseries (LIFF public — read only)
+    (path === '/api/nurseries' && c.req.method === 'GET') ||
+    (path.match(/^\/api\/nurseries\/[^/]+$/) && c.req.method === 'GET') ||
+    (path.match(/^\/api\/nurseries\/[^/]+\/photo\//) && c.req.method === 'GET') ||
     (path.match(/^\/api\/jobs\/[^/]+\/book$/) && c.req.method === 'POST') ||
-    // Note: /api/bookings/pending, /approve, /deny are NOT public — they require API_KEY
     // Profile & Documents (LIFF public)
     path.match(/^\/api\/profiles(\/[^/]+)?$/) ||
     (path === '/api/documents/upload' && c.req.method === 'POST') ||
@@ -50,9 +47,21 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   }
 
   const token = authHeader.slice('Bearer '.length);
-  if (token !== c.env.API_KEY) {
-    return c.json({ success: false, error: 'Unauthorized' }, 401);
+
+  // 1. JWT検証を優先
+  const jwtPayload = await verifyJwt(token, c.env.API_KEY);
+  if (jwtPayload) {
+    c.set('adminId' as never, jwtPayload.sub as never);
+    c.set('adminEmail' as never, jwtPayload.email as never);
+    return next();
   }
 
-  return next();
+  // 2. フォールバック: API_KEY直接照合（移行期間中の互換性維持）
+  if (token === c.env.API_KEY) {
+    c.set('adminId' as never, 'api-key' as never);
+    c.set('adminEmail' as never, 'api-key-auth' as never);
+    return next();
+  }
+
+  return c.json({ success: false, error: 'Unauthorized' }, 401);
 }

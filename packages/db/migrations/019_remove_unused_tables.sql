@@ -1,0 +1,20 @@
+-- Remove unused CRM tables (not needed for spot-hoiku)
+DROP TABLE IF EXISTS affiliates;
+DROP TABLE IF EXISTS affiliate_clicks;
+DROP TABLE IF EXISTS conversion_points;
+DROP TABLE IF EXISTS conversion_events;
+DROP TABLE IF EXISTS stripe_events;
+DROP TABLE IF EXISTS operators;
+DROP TABLE IF EXISTS chats;
+DROP TABLE IF EXISTS incoming_webhooks;
+DROP TABLE IF EXISTS outgoing_webhooks;
+DROP TABLE IF EXISTS reminders;
+DROP TABLE IF EXISTS reminder_steps;
+DROP TABLE IF EXISTS friend_reminders;
+DROP TABLE IF EXISTS friend_reminder_deliveries;
+DROP TABLE IF EXISTS scoring_rules;
+DROP TABLE IF EXISTS friend_scores;
+DROP TABLE IF EXISTS templates;
+DROP TABLE IF EXISTS automations;
+DROP TABLE IF EXISTS automation_logs;
+DROP TABLE IF EXISTS tracked_links;

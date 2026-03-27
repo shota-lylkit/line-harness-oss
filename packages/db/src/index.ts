@@ -5,20 +5,10 @@ export * from './scenarios';
 export * from './broadcasts';
 export * from './users';
 export * from './line-accounts';
-export * from './conversions';
-export * from './affiliates';
-export * from './webhooks';
 export * from './calendar';
-export * from './reminders';
-export * from './scoring';
-export * from './templates';
-export * from './chats';
 export * from './notifications';
-export * from './stripe';
 export * from './health';
-export * from './automations';
 export * from './entry-routes';
-export * from './tracked-links';
 export * from './forms';
 export * from './jobs';
 export * from './nurseries';
@@ -27,6 +17,7 @@ export * from './attendance';
 export * from './reviews';
 export * from './credit-score';
 export * from './payroll';
+export * from './admin-auth';
 
 /**
  * Thin wrapper around D1Database.
