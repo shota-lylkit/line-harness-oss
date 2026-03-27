@@ -2,6 +2,20 @@
 import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 
+/**
+ * JWTの有効期限をクライアント側で簡易チェック
+ */
+function isJwtExpired(token: string): boolean {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return true
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return payload.exp < Math.floor(Date.now() / 1000)
+  } catch {
+    return true
+  }
+}
+
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -13,8 +27,9 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       return
     }
 
-    const key = localStorage.getItem('spot_admin_api_key')
-    if (!key) {
+    const token = localStorage.getItem('spot_admin_jwt')
+    if (!token || isJwtExpired(token)) {
+      localStorage.removeItem('spot_admin_jwt')
       router.replace('/login')
     } else {
       setChecked(true)

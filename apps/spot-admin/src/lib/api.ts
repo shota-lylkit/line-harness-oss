@@ -103,10 +103,13 @@ export type ApiResponse<T> = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
 
-function getApiKey(): string {
+function getAuthToken(): string {
   if (typeof window !== 'undefined') {
-    const stored = localStorage.getItem('spot_admin_api_key')
-    if (stored) return stored
+    const jwt = localStorage.getItem('spot_admin_jwt')
+    if (jwt) return jwt
+    // フォールバック: 旧API_KEY方式（移行期間中）
+    const apiKey = localStorage.getItem('spot_admin_api_key')
+    if (apiKey) return apiKey
   }
   return process.env.NEXT_PUBLIC_API_KEY || ''
 }
@@ -116,7 +119,7 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${getApiKey()}`,
+      Authorization: `Bearer ${getAuthToken()}`,
       ...options?.headers,
     },
   })

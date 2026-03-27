@@ -95,6 +95,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <p className="text-xs text-gray-400">spot-admin v{process.env.APP_VERSION || '0.0.0'}</p>
         <button
           onClick={() => {
+            localStorage.removeItem('spot_admin_jwt')
             localStorage.removeItem('spot_admin_api_key')
             window.location.href = '/login'
           }}

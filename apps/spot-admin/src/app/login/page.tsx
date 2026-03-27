@@ -5,10 +5,14 @@ import { useRouter } from 'next/navigation'
 const BRAND_COLOR = '#FF6B35'
 
 export default function LoginPage() {
-  const [apiKey, setApiKey] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [isSetup, setIsSetup] = useState(false)
   const router = useRouter()
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -16,16 +20,20 @@ export default function LoginPage() {
     setError('')
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
-      const res = await fetch(`${apiUrl}/api/friends/count`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
+      const endpoint = isSetup ? '/auth/setup' : '/auth/login'
+      const res = await fetch(`${apiUrl}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
       })
 
-      if (res.ok) {
-        localStorage.setItem('spot_admin_api_key', apiKey)
+      const data = await res.json() as { success: boolean; token?: string; error?: string }
+
+      if (data.success && data.token) {
+        localStorage.setItem('spot_admin_jwt', data.token)
         router.push('/')
       } else {
-        setError('APIキーが正しくありません')
+        setError(data.error || 'ログインに失敗しました')
       }
     } catch {
       setError('接続に失敗しました')
@@ -42,19 +50,32 @@ export default function LoginPage() {
             S
           </div>
           <h1 className="text-xl font-bold text-gray-900">スポットほいく</h1>
-          <p className="text-sm text-gray-500 mt-1">運営管理にログイン</p>
+          <p className="text-sm text-gray-500 mt-1">
+            {isSetup ? '初回セットアップ' : '運営管理にログイン'}
+          </p>
         </div>
 
         <form onSubmit={handleLogin}>
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス</label>
             <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="APIキーを入力"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="admin@example.com"
               className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
               autoFocus
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">パスワード</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={isSetup ? '8文字以上で設定' : 'パスワードを入力'}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
             />
           </div>
 
@@ -62,13 +83,20 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || !apiKey}
+            disabled={loading || !email || !password}
             className="w-full py-3 text-white font-medium rounded-lg transition-opacity hover:opacity-90 disabled:opacity-50"
             style={{ backgroundColor: BRAND_COLOR }}
           >
-            {loading ? 'ログイン中...' : 'ログイン'}
+            {loading ? '処理中...' : isSetup ? 'アカウント作成' : 'ログイン'}
           </button>
         </form>
+
+        <button
+          onClick={() => { setIsSetup(!isSetup); setError('') }}
+          className="w-full mt-3 text-sm text-gray-500 hover:text-gray-700"
+        >
+          {isSetup ? '← ログインに戻る' : '初回セットアップはこちら'}
+        </button>
       </div>
     </div>
   )
