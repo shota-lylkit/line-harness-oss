@@ -290,7 +290,7 @@ function renderLoading(): string {
 }
 
 function renderError(message: string): string {
-  return `${baseStyle()}<div class="container"><div class="card"><div class="icon">⚠️</div><p class="title error">${message}</p></div></div>`;
+  return `${baseStyle()}<div class="container"><div class="card"><div class="icon">⚠️</div><p class="title error">${escapeHtml(message)}</p></div></div>`;
 }
 
 function renderNoBooking(nursery: string, date: string, start: string, end: string): string {
@@ -298,8 +298,8 @@ function renderNoBooking(nursery: string, date: string, start: string, end: stri
     <div class="icon">❌</div>
     <p class="title">予約が見つかりません</p>
     <div class="info">
-      <div class="info-row"><span class="info-label">🏫</span>${nursery}</div>
-      <div class="info-row"><span class="info-label">📅</span>${date} ${start}〜${end}</div>
+      <div class="info-row"><span class="info-label">🏫</span>${escapeHtml(nursery)}</div>
+      <div class="info-row"><span class="info-label">📅</span>${escapeHtml(date)} ${escapeHtml(start)}〜${escapeHtml(end)}</div>
     </div>
     <p class="subtitle">このお仕事への応募が確認できませんでした。<br>先にお仕事に応募してください。</p>
   </div></div>`;
@@ -310,8 +310,8 @@ function renderNotApproved(nursery: string, date: string): string {
     <div class="icon">⏳</div>
     <p class="title">承認待ちです</p>
     <div class="info">
-      <div class="info-row"><span class="info-label">🏫</span>${nursery}</div>
-      <div class="info-row"><span class="info-label">📅</span>${date}</div>
+      <div class="info-row"><span class="info-label">🏫</span>${escapeHtml(nursery)}</div>
+      <div class="info-row"><span class="info-label">📅</span>${escapeHtml(date)}</div>
     </div>
     <p class="subtitle">応募がまだ承認されていません。<br>承認後にチェックインできます。</p>
   </div></div>`;
@@ -337,7 +337,7 @@ function renderCheckinSuccess(nursery: string, checkInAt: string): string {
     <p class="title">出勤しました！</p>
     <div class="time-display">${formatTime(checkInAt)}</div>
     <div class="info">
-      <div class="info-row"><span class="info-label">🏫</span>${nursery}</div>
+      <div class="info-row"><span class="info-label">🏫</span>${escapeHtml(nursery)}</div>
     </div>
     <p class="subtitle">本日もよろしくお願いします！<br>退勤時にもう一度QRコードをスキャンしてください。</p>
     <p class="close-note">この画面は閉じて大丈夫です</p>
@@ -389,7 +389,7 @@ function renderCheckoutSuccess(
     <div class="success-icon">🎉</div>
     <p class="title">退勤しました！</p>
     <div class="info">
-      <div class="info-row"><span class="info-label">🏫</span>${nursery}</div>
+      <div class="info-row"><span class="info-label">🏫</span>${escapeHtml(nursery)}</div>
       <div class="info-row"><span class="info-label">🕐</span>出勤: ${formatTime(checkInAt)}</div>
       <div class="info-row"><span class="info-label">🕐</span>退勤: ${formatTime(checkOutAt)}</div>
     </div>
@@ -405,8 +405,8 @@ function renderCompleted(nursery: string, date: string, checkInAt: string, check
     <div class="icon">✅</div>
     <p class="title">勤務完了</p>
     <div class="info">
-      <div class="info-row"><span class="info-label">🏫</span>${nursery}</div>
-      <div class="info-row"><span class="info-label">📅</span>${date}</div>
+      <div class="info-row"><span class="info-label">🏫</span>${escapeHtml(nursery)}</div>
+      <div class="info-row"><span class="info-label">📅</span>${escapeHtml(date)}</div>
       <div class="info-row"><span class="info-label">🕐</span>出勤: ${formatTime(checkInAt)}</div>
       <div class="info-row"><span class="info-label">🕐</span>退勤: ${formatTime(checkOutAt)}</div>
     </div>
