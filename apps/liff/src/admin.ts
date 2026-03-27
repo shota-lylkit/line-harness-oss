@@ -15,7 +15,7 @@ interface AdminState {
   authenticated: boolean;
   apiKey: string;
   loading: boolean;
-  activeTab: 'overview' | 'jobs' | 'bookings' | 'friends' | 'approvals' | 'documents';
+  activeTab: 'overview' | 'jobs' | 'bookings' | 'friends' | 'approvals' | 'documents' | 'notifications';
   stats: {
     totalFriends: number;
     openJobs: number;
@@ -28,8 +28,20 @@ interface AdminState {
   friends: AdminFriend[];
   pendingBookings: PendingBooking[];
   documents: AdminDocument[];
+  messageLogs: MessageLog[];
   selectedBooking: AdminBooking | null;
   bookingProfile: BookingProfile | null;
+}
+
+interface MessageLog {
+  id: string;
+  friendId: string;
+  displayName: string;
+  direction: string;
+  messageType: string;
+  content: string;
+  deliveryType: string;
+  createdAt: string;
 }
 
 interface AdminJob {
@@ -126,6 +138,7 @@ const state: AdminState = {
   friends: [],
   pendingBookings: [],
   documents: [],
+  messageLogs: [],
   selectedBooking: null,
   bookingProfile: null,
 };
@@ -346,6 +359,7 @@ function renderDashboard(): void {
         <button class="admin-tab ${state.activeTab === 'bookings' ? 'active' : ''}" data-tab="bookings">応募</button>
         <button class="admin-tab ${state.activeTab === 'friends' ? 'active' : ''}" data-tab="friends">友だち</button>
         <button class="admin-tab ${state.activeTab === 'documents' ? 'active' : ''}" data-tab="documents">書類${state.documents.filter(d => d.status === 'pending').length > 0 ? ` (${state.documents.filter(d => d.status === 'pending').length})` : ''}</button>
+        <button class="admin-tab ${state.activeTab === 'notifications' ? 'active' : ''}" data-tab="notifications">通知</button>
       </nav>
 
       <main class="admin-main">
@@ -366,6 +380,10 @@ function renderDashboard(): void {
       }
       if (state.activeTab === 'documents' && state.documents.length === 0) {
         loadDocuments();
+        return;
+      }
+      if (state.activeTab === 'notifications' && state.messageLogs.length === 0) {
+        loadMessageLogs();
         return;
       }
       renderDashboard();
@@ -395,6 +413,9 @@ function renderDashboard(): void {
     if (state.activeTab === 'documents') {
       state.documents = [];
       loadDocuments();
+    } else if (state.activeTab === 'notifications') {
+      state.messageLogs = [];
+      loadMessageLogs();
     } else {
       loadDashboard();
     }
@@ -455,6 +476,7 @@ function renderActiveTab(): string {
     case 'bookings': return renderBookings();
     case 'friends': return renderFriends();
     case 'documents': return renderDocuments();
+    case 'notifications': return renderNotifications();
     default: return '';
   }
 }
@@ -822,6 +844,83 @@ function renderProfileModal(): void {
 
   modal.querySelector('#modalBackdrop')?.addEventListener('click', () => { modal.style.display = 'none'; });
   modal.querySelector('#closeModal')?.addEventListener('click', () => { modal.style.display = 'none'; });
+}
+
+// ========== Notifications Tab ==========
+
+async function loadMessageLogs(): Promise<void> {
+  state.loading = true;
+  renderDashboard();
+  const res = await apiCall('/api/notifications/message-log?limit=50&direction=outgoing');
+  if (res.ok) {
+    const d = await res.json() as { success: boolean; data: MessageLog[] };
+    state.messageLogs = d.data || [];
+  }
+  state.loading = false;
+  renderDashboard();
+}
+
+function renderNotifications(): string {
+  const { messageLogs } = state;
+
+  if (messageLogs.length === 0) {
+    return `
+      <div class="admin-section">
+        <div class="section-header">
+          <h2>送信通知ログ</h2>
+          <button id="refreshBtn" class="refresh-btn">更新</button>
+        </div>
+        <p class="empty-text">送信ログはありません</p>
+      </div>
+    `;
+  }
+
+  const cards = messageLogs.map(log => {
+    // メッセージ種別のラベル
+    const typeLabels: Record<string, string> = {
+      text: 'テキスト',
+      flex: 'Flex',
+      image: '画像',
+      template: 'テンプレート',
+    };
+    const typeLabel = typeLabels[log.messageType] || log.messageType;
+
+    // 送信方法のバッジ
+    const deliveryBadge = log.deliveryType === 'push'
+      ? '<span class="status-badge" style="background:#e3f2fd;color:#1565c0;">Push</span>'
+      : log.deliveryType === 'reply'
+        ? '<span class="status-badge" style="background:#e8f5e9;color:#2e7d32;">Reply</span>'
+        : '';
+
+    // 内容のプレビュー
+    const contentPreview = log.content
+      ? escapeHtml(log.content.length > 100 ? log.content.slice(0, 100) + '…' : log.content)
+      : '<span style="color:#aaa;">（内容なし）</span>';
+
+    return `
+      <div class="admin-card">
+        <div class="card-header">
+          <span class="card-title">${escapeHtml(log.displayName)}</span>
+          <span style="font-size:11px;color:#888;">${formatDateTime(log.createdAt)}</span>
+        </div>
+        <div class="card-meta" style="margin-top:6px;">
+          <span class="status-badge" style="background:#f3e5f5;color:#7b1fa2;">${typeLabel}</span>
+          ${deliveryBadge}
+        </div>
+        <div style="margin-top:8px;font-size:13px;color:#555;line-height:1.5;word-break:break-all;">${contentPreview}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="admin-section">
+      <div class="section-header">
+        <h2>送信通知ログ (直近${messageLogs.length}件)</h2>
+        <button id="refreshBtn" class="refresh-btn">更新</button>
+      </div>
+      ${cards}
+    </div>
+  `;
 }
 
 // ========== Entry Point ==========

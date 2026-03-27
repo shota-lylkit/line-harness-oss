@@ -507,6 +507,35 @@ CREATE TABLE IF NOT EXISTS automation_logs (
 CREATE INDEX IF NOT EXISTS idx_automation_logs_automation ON automation_logs (automation_id);
 
 -- ============================================================
+-- Nurseries (園マスタ) — スポットほいく園情報管理
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS nurseries (
+  id                TEXT PRIMARY KEY,
+  name              TEXT NOT NULL,
+  prefecture        TEXT,
+  area              TEXT,
+  nursery_type      TEXT,
+  qualification_req TEXT,
+  address           TEXT,
+  station           TEXT,
+  access_info       TEXT,
+  hp_url            TEXT,
+  description       TEXT,
+  requirements      TEXT,
+  notes             TEXT,
+  transport_fee     INTEGER DEFAULT 0,
+  break_minutes     INTEGER DEFAULT 60,
+  photo_r2_keys     TEXT DEFAULT '[]',
+  is_active         INTEGER NOT NULL DEFAULT 1,
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_nurseries_name ON nurseries (name);
+CREATE INDEX IF NOT EXISTS idx_nurseries_active ON nurseries (is_active);
+
+-- ============================================================
 -- Jobs (求人) — スポットほいく求人管理
 -- ============================================================
 
@@ -543,6 +572,10 @@ ALTER TABLE calendar_bookings ADD COLUMN check_in_at TEXT;
 ALTER TABLE calendar_bookings ADD COLUMN check_out_at TEXT;
 ALTER TABLE calendar_bookings ADD COLUMN actual_hours REAL;
 
+-- jobs に nursery_id 追加
+ALTER TABLE jobs ADD COLUMN nursery_id TEXT REFERENCES nurseries(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_jobs_nursery ON jobs (nursery_id);
+
 -- jobs に勤怠用トークン追加
 ALTER TABLE jobs ADD COLUMN attendance_token TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_attendance_token ON jobs (attendance_token);
@@ -569,7 +602,7 @@ CREATE INDEX IF NOT EXISTS idx_user_profiles_friend ON user_profiles (friend_id)
 CREATE TABLE IF NOT EXISTS user_documents (
   id          TEXT PRIMARY KEY,
   friend_id   TEXT NOT NULL REFERENCES friends(id) ON DELETE CASCADE,
-  doc_type    TEXT NOT NULL CHECK (doc_type IN ('id_card', 'qualification_cert')),
+  doc_type    TEXT NOT NULL CHECK (doc_type IN ('id_card', 'id_card_back', 'qualification_cert', 'bacterial_test_cert')),
   r2_key      TEXT NOT NULL DEFAULT '',
   file_name   TEXT,
   status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'verified', 'rejected')),

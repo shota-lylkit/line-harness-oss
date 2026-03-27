@@ -153,4 +153,41 @@ notifications.get('/api/notifications', async (c) => {
   }
 });
 
+// ========== 送信メッセージログ（messages_log: outgoing） ==========
+
+notifications.get('/api/notifications/message-log', async (c) => {
+  try {
+    const limit = Number(c.req.query('limit') ?? '50');
+    const direction = c.req.query('direction') ?? 'outgoing';
+    const result = await c.env.DB
+      .prepare(`
+        SELECT ml.id, ml.friend_id, ml.direction, ml.message_type, ml.content, ml.delivery_type, ml.created_at,
+               f.display_name
+        FROM messages_log ml
+        LEFT JOIN friends f ON f.id = ml.friend_id
+        WHERE ml.direction = ?
+        ORDER BY ml.created_at DESC
+        LIMIT ?
+      `)
+      .bind(direction, limit)
+      .all();
+    return c.json({
+      success: true,
+      data: result.results.map((r: Record<string, unknown>) => ({
+        id: r.id,
+        friendId: r.friend_id,
+        displayName: r.display_name || '不明',
+        direction: r.direction,
+        messageType: r.message_type,
+        content: typeof r.content === 'string' && r.content.length > 200 ? r.content.slice(0, 200) + '…' : r.content,
+        deliveryType: r.delivery_type,
+        createdAt: r.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error('GET /api/notifications/message-log error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 export { notifications };

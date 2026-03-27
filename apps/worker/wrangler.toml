@@ -2,13 +2,15 @@ name = "line-crm-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 workers_dev = true
-account_id = "37f8f88be4c099329e4647bda211bb9f"
+account_id = "e9667eff95c3d4f3b9aa16c08004efc9"
 
 # API_KEY is set via `wrangler secret put API_KEY`
 # Do NOT hardcode secrets here
 
 [vars]
 WORKER_URL = "https://line-crm-worker.spothoiku-test.workers.dev"
+LIFF_URL = "https://spothoiku-liff.pages.dev"
+LINE_LOGIN_CHANNEL_ID = "2009592890"
 
 [[d1_databases]]
 binding = "DB"

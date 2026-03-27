@@ -136,7 +136,7 @@ profiles.put('/api/profiles/:friendId', async (c) => {
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'application/pdf'] as const;
 const MIME_TO_EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' };
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-const ALLOWED_DOC_TYPES = ['id_card', 'qualification_cert'] as const;
+const ALLOWED_DOC_TYPES = ['id_card', 'id_card_back', 'qualification_cert', 'bacterial_test_cert'] as const;
 
 profiles.post('/api/documents/upload', async (c) => {
   try {
@@ -163,7 +163,7 @@ profiles.post('/api/documents/upload', async (c) => {
 
       // Validate docType
       if (!ALLOWED_DOC_TYPES.includes(body.docType as typeof ALLOWED_DOC_TYPES[number])) {
-        return c.json({ success: false, error: 'Invalid docType. Must be id_card or qualification_cert' }, 400);
+        return c.json({ success: false, error: 'Invalid docType' }, 400);
       }
 
       // Validate MIME type
@@ -219,7 +219,7 @@ profiles.post('/api/documents/upload', async (c) => {
 
     // Validate docType
     if (!ALLOWED_DOC_TYPES.includes(docType as typeof ALLOWED_DOC_TYPES[number])) {
-      return c.json({ success: false, error: 'Invalid docType. Must be id_card or qualification_cert' }, 400);
+      return c.json({ success: false, error: 'Invalid docType' }, 400);
     }
 
     // Validate MIME type
