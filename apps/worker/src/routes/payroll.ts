@@ -116,6 +116,12 @@ payroll.get('/api/payroll/:friendId', async (c) => {
 
 payroll.post('/api/payroll', async (c) => {
   try {
+    // 管理者/内部処理のみ（API_KEY認証必須）
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader?.startsWith('Bearer ') || authHeader.slice(7) !== c.env.API_KEY) {
+      return c.json({ success: false, error: 'Admin access required' }, 403);
+    }
+
     const body = await c.req.json<{
       friendId: string;
       bookingId: string;
@@ -164,10 +170,16 @@ payroll.post('/api/payroll', async (c) => {
   }
 });
 
-// ========== 管理者向け: 支払いステータス更新 ==========
+// ========== 管理者向け: 支払いステータス更新（API_KEY認証必須） ==========
 
 payroll.put('/api/payroll/:id/status', async (c) => {
   try {
+    // 管理者のみ（LIFF認証ユーザーは操作不可）
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader?.startsWith('Bearer ') || authHeader.slice(7) !== c.env.API_KEY) {
+      return c.json({ success: false, error: 'Admin access required' }, 403);
+    }
+
     const id = c.req.param('id');
     const body = await c.req.json<{ status: 'processing' | 'paid' }>();
     if (!body.status || !['processing', 'paid'].includes(body.status)) {
@@ -190,6 +202,18 @@ payroll.put('/api/payroll/:id/method', async (c) => {
     if (!body.method || !['spot', 'monthly'].includes(body.method)) {
       return c.json({ success: false, error: 'method must be spot or monthly' }, 400);
     }
+
+    // friendId所有権チェック: レコードのfriend_idがリクエスト元と一致するか確認
+    const record = await c.env.DB.prepare(
+      `SELECT friend_id FROM payroll_records WHERE id = ?`
+    ).bind(id).first<{ friend_id: string }>();
+    if (!record) {
+      return c.json({ success: false, error: 'Record not found' }, 404);
+    }
+    if (c.get('liffFriendId') && !assertOwnFriendId(c, record.friend_id)) {
+      return c.json({ success: false, error: 'Access denied' }, 403);
+    }
+
     await updatePayrollMethod(c.env.DB, id, body.method);
     return c.json({ success: true });
   } catch (err) {
@@ -228,6 +252,12 @@ payroll.put('/api/payment-settings/:friendId', async (c) => {
       accountNumber?: string;
       accountHolder?: string;
     }>();
+
+    // 口座番号バリデーション: 数字7桁
+    if (body.accountNumber && !/^\d{7}$/.test(body.accountNumber)) {
+      return c.json({ success: false, error: 'Account number must be 7 digits' }, 400);
+    }
+
     const settings = await upsertWorkerPaymentSettings(c.env.DB, friendId, body);
     return c.json({ success: true, data: settings });
   } catch (err) {

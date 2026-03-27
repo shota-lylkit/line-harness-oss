@@ -94,7 +94,7 @@ export async function createPayrollRecord(
   if (!hours) {
     const [sh, sm] = input.startTime.split(':').map(Number);
     const [eh, em] = input.endTime.split(':').map(Number);
-    hours = (eh * 60 + em - sh * 60 - sm) / 60;
+    hours = Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60);
   }
 
   const grossAmount = Math.round(hours * input.hourlyRate);

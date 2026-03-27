@@ -14,6 +14,10 @@ declare const liff: {
 
 const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:8787';
 
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
 function apiCall(path: string, options?: RequestInit): Promise<Response> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
@@ -183,6 +187,7 @@ function setupCheckoutButton(token: string, friendId: string, nurseryName: strin
         const d = data.data as { checkInAt: string; checkOutAt: string; actualHours: number; payroll?: { grossAmount: number; withholdingTax: number; netAmount: number; paymentMethod: string } };
         const container = document.getElementById('app')!;
         container.innerHTML = renderCheckoutSuccess(nurseryName, d.checkInAt, d.checkOutAt, d.actualHours, d.payroll);
+        if (d.payroll) setupPaymentButtons(friendId, d.payroll);
       } else {
         btn.textContent = data.error || 'エラーが発生しました';
         setTimeout(() => {
@@ -197,6 +202,35 @@ function setupCheckoutButton(token: string, friendId: string, nurseryName: strin
         (btn as HTMLButtonElement).disabled = false;
       }, 2000);
     }
+  });
+}
+
+function setupPaymentButtons(friendId: string, payroll: { grossAmount: number; withholdingTax: number; netAmount: number; paymentMethod: string }): void {
+  const buttons = document.querySelectorAll('.payment-btn');
+  buttons.forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const method = (btn as HTMLElement).dataset.method as 'spot' | 'monthly';
+      if (method === payroll.paymentMethod) return;
+
+      // UIを即時更新
+      buttons.forEach((b) => {
+        const m = (b as HTMLElement).dataset.method;
+        const selected = m === method;
+        (b as HTMLElement).style.borderColor = selected ? '#f06292' : '#ddd';
+        (b as HTMLElement).style.background = selected ? '#fce4ec' : '#fff';
+      });
+      payroll.paymentMethod = method;
+
+      // API呼び出し（ベストエフォート）
+      try {
+        await apiCall(`/api/payment-settings/${friendId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ defaultPaymentMethod: method }),
+        });
+      } catch {
+        console.error('Failed to update payment method');
+      }
+    });
   });
 }
 
@@ -287,9 +321,9 @@ function renderCheckinReady(nursery: string, date: string, start: string, end: s
   return `${baseStyle()}<div class="container"><div class="card">
     <div class="icon">👋</div>
     <p class="title">おはようございます！</p>
-    <div class="name-badge">${name} さん</div>
+    <div class="name-badge">${escapeHtml(name)} さん</div>
     <div class="info">
-      <div class="info-row"><span class="info-label">🏫</span>${nursery}</div>
+      <div class="info-row"><span class="info-label">🏫</span>${escapeHtml(nursery)}</div>
       <div class="info-row"><span class="info-label">📅</span>${date}</div>
       <div class="info-row"><span class="info-label">⏰</span>${start}〜${end}</div>
     </div>
@@ -314,9 +348,9 @@ function renderCheckoutReady(nursery: string, date: string, start: string, end: 
   return `${baseStyle()}<div class="container"><div class="card">
     <div class="icon">🏠</div>
     <p class="title">おつかれさまでした！</p>
-    <div class="name-badge">${name} さん</div>
+    <div class="name-badge">${escapeHtml(name)} さん</div>
     <div class="info">
-      <div class="info-row"><span class="info-label">🏫</span>${nursery}</div>
+      <div class="info-row"><span class="info-label">🏫</span>${escapeHtml(nursery)}</div>
       <div class="info-row"><span class="info-label">📅</span>${date} ${start}〜${end}</div>
       <div class="info-row"><span class="info-label">🕐</span>出勤: ${formatTime(checkInAt)}</div>
     </div>

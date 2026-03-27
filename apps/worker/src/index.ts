@@ -54,6 +54,7 @@ export type Env = {
     WORKER_URL: string;
     ADMIN_LINE_USER_ID?: string;
     ANTHROPIC_API_KEY?: string;
+    ADMIN_URL?: string;
     DOCUMENTS: R2Bucket;
   };
   Variables: {
@@ -75,7 +76,7 @@ app.use('*', cors({
       // LINE LIFF SDK loads from these origins
       'https://liff.line.me',
       // spot-admin (Cloudflare Pages)
-      'https://spothoiku-admin.pages.dev',
+      c.env.ADMIN_URL || 'https://spothoiku-admin.pages.dev',
       // Local dev
       'http://localhost:3002',
     ].filter(Boolean);
@@ -253,6 +254,7 @@ async function runD1Backup(db: D1Database, r2: R2Bucket): Promise<void> {
       'friend_scenarios', 'broadcasts', 'messages_log', 'line_accounts', 'user_profiles',
       'user_documents', 'favorite_nurseries', 'nurseries', 'jobs', 'calendar_bookings', 'reviews',
       'cancellation_log',
+      'payroll_records', 'worker_payment_settings', 'withholding_tax_rates',
     ];
     const backup: Record<string, unknown[]> = {};
 
