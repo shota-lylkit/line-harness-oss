@@ -25,6 +25,40 @@ importers:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@25.5.0)(jiti@2.6.1)(lightningcss@1.32.0)
 
+  apps/spot-admin:
+    dependencies:
+      next:
+        specifier: ^15.1.0
+        version: 15.5.14(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      '@tailwindcss/postcss':
+        specifier: ^4.0.0
+        version: 4.2.2
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.14)
+      postcss:
+        specifier: ^8.5.0
+        version: 8.5.8
+      tailwindcss:
+        specifier: ^4.0.0
+        version: 4.2.2
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   apps/web:
     dependencies:
       '@line-crm/shared':
@@ -95,6 +129,9 @@ importers:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@25.5.0)(lightningcss@1.32.0)
 
   packages/line-sdk:
     devDependencies:
@@ -105,8 +142,8 @@ importers:
   packages/mcp-server:
     dependencies:
       '@line-harness/sdk':
-        specifier: workspace:*
-        version: link:../sdk
+        specifier: ^0.1.0
+        version: 0.1.0
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.1
         version: 1.28.0(zod@3.25.76)
@@ -1286,6 +1323,9 @@ packages:
     resolution: {integrity: sha512-rVQTBIROL3DMWpjzC2/f5qYO2mAZsV+1Rk4NVJzUpB59atEddmXONLGPlSk3GFASLMcU8Sb3G8gu61dFrM9wNw==}
     peerDependencies:
       tslib: ^2.3.0
+
+  '@line-harness/sdk@0.1.0':
+    resolution: {integrity: sha512-C4KTPQ7mtRk0wqEaoW0obPYPNQdThL2/dGUtPiFipe/6peIIXoaP85ODy8gjvnuOTo7lRiz53G6bzFuf35My9g==}
 
   '@line/bot-sdk@10.6.0':
     resolution: {integrity: sha512-4hSpglL/G/cW2JCcohaYz/BS0uOSJNV9IEYdMm0EiPEvDLayoI2hGq2D86uYPQFD2gvgkyhmzdShpWLG3P5r3w==}
@@ -3700,6 +3740,8 @@ snapshots:
       '@liff/logger': 2.27.3(tslib@2.8.1)
       '@liff/util': 2.27.3(tslib@2.8.1)
       tslib: 2.8.1
+
+  '@line-harness/sdk@0.1.0': {}
 
   '@line/bot-sdk@10.6.0':
     dependencies:

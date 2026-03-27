@@ -68,6 +68,36 @@ export function calculateWithholdingTax(
 }
 
 /**
+ * HH:MM形式の開始・終了時刻から勤務時間を計算
+ * actualHoursがnull以外ならそちらを優先
+ */
+export function calculateHoursFromTimes(
+  startTime: string,
+  endTime: string,
+  actualHours: number | null,
+): number {
+  if (actualHours != null) return actualHours;
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  return Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60);
+}
+
+/**
+ * 報酬額（総額・源泉徴収・手取り）を計算
+ */
+export function calculatePayrollAmounts(
+  hours: number,
+  hourlyRate: number,
+  transportFee: number,
+  taxRate: WithholdingTaxRate | null,
+): { grossAmount: number; withholdingTax: number; netAmount: number } {
+  const grossAmount = Math.round(hours * hourlyRate);
+  const withholdingTax = calculateWithholdingTax(grossAmount, taxRate);
+  const netAmount = grossAmount + transportFee - withholdingTax;
+  return { grossAmount, withholdingTax, netAmount };
+}
+
+/**
  * 報酬を自動計算してレコードを作成
  */
 export async function createPayrollRecord(
@@ -89,23 +119,13 @@ export async function createPayrollRecord(
   const id = crypto.randomUUID();
   const now = jstNow();
 
-  // 勤務時間計算（actual_hoursがあればそちら優先、なければ予定時間から計算）
-  let hours = input.actualHours;
-  if (!hours) {
-    const [sh, sm] = input.startTime.split(':').map(Number);
-    const [eh, em] = input.endTime.split(':').map(Number);
-    hours = Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60);
-  }
-
-  const grossAmount = Math.round(hours * input.hourlyRate);
+  const hours = calculateHoursFromTimes(input.startTime, input.endTime, input.actualHours);
   const transportFee = input.transportFee || 0;
 
   // 源泉徴収計算
   const year = parseInt(input.workDate.slice(0, 4), 10);
   const taxRate = await getWithholdingTaxRate(db, year);
-  const withholdingTax = calculateWithholdingTax(grossAmount, taxRate);
-
-  const netAmount = grossAmount + transportFee - withholdingTax;
+  const { grossAmount, withholdingTax, netAmount } = calculatePayrollAmounts(hours, input.hourlyRate, transportFee, taxRate);
 
   // 振込方法: ワーカーのデフォルト設定を使用、指定があればそちら優先
   let paymentMethod = input.paymentMethod || 'monthly';
