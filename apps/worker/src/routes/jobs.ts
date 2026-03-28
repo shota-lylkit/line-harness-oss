@@ -112,18 +112,21 @@ ${text}`,
     // JSON配列を抽出（コードブロック内でも対応）
     const jsonMatch = aiText.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
-      return c.json({ success: false, error: 'Failed to parse AI response', raw: aiText }, 422);
+      console.error('AI parse failed (no JSON array):', aiText.slice(0, 500));
+      return c.json({ success: false, error: 'Failed to parse AI response' }, 422);
     }
 
     let parsed: unknown[];
     try {
       parsed = JSON.parse(jsonMatch[0]);
     } catch {
-      return c.json({ success: false, error: 'AI returned invalid JSON', raw: aiText }, 422);
+      console.error('AI parse failed (invalid JSON):', aiText.slice(0, 500));
+      return c.json({ success: false, error: 'AI returned invalid JSON' }, 422);
     }
 
     if (!Array.isArray(parsed)) {
-      return c.json({ success: false, error: 'AI response is not an array', raw: aiText }, 422);
+      console.error('AI parse failed (not array):', aiText.slice(0, 500));
+      return c.json({ success: false, error: 'AI response is not an array' }, 422);
     }
 
     // バリデーション: 必須フィールドと形式チェック

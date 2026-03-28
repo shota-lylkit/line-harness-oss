@@ -6,6 +6,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   // Skip auth for public endpoints
   const path = new URL(c.req.url).pathname;
   if (
+    path === '/health' ||
     path === '/webhook' ||
     path === '/docs' ||
     path === '/openapi.json' ||

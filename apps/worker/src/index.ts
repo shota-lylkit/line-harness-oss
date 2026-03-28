@@ -58,7 +58,37 @@ export type Env = {
 
 const app = new Hono<Env>();
 
-// CORS — restrict to known origins
+// ─── Security Headers ─────────────────────────────────────────
+app.use('*', async (c, next) => {
+  await next();
+  c.res.headers.set('X-Content-Type-Options', 'nosniff');
+  c.res.headers.set('X-Frame-Options', 'DENY');
+  c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  c.res.headers.set('X-XSS-Protection', '1; mode=block');
+  c.res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  c.res.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+});
+
+// ─── Request Body Size Limit (1MB) ───────────────────────────
+app.use('*', async (c, next) => {
+  const contentLength = parseInt(c.req.header('content-length') || '0', 10);
+  if (contentLength > 1_048_576) {
+    return c.json({ success: false, error: 'Payload too large' }, 413);
+  }
+  await next();
+});
+
+// ─── Health Check (liveness + DB connectivity) ───────────────
+app.get('/health', async (c) => {
+  try {
+    await c.env.DB.prepare('SELECT 1').first();
+    return c.json({ status: 'ok', timestamp: new Date().toISOString() });
+  } catch {
+    return c.json({ status: 'error', message: 'DB unreachable' }, 503);
+  }
+});
+
+// CORS — restrict to known origins (no localhost in production)
 app.use('*', cors({
   origin: (origin, c) => {
     const liffUrl = c.env.LIFF_URL || '';
@@ -66,18 +96,16 @@ app.use('*', cors({
     const allowed = [
       liffUrl,
       workerUrl,
-      // LINE LIFF SDK loads from these origins
       'https://liff.line.me',
-      // spot-admin (Cloudflare Pages)
       c.env.ADMIN_URL || 'https://spothoiku-admin.pages.dev',
-      // Local dev
-      'http://localhost:3002',
     ].filter(Boolean);
-    // Allow if origin matches any allowed origin (strip trailing slash)
+    // Local dev: only allow if WORKER_URL contains 'localhost' or 'test'
+    if (workerUrl.includes('localhost') || workerUrl.includes('test')) {
+      allowed.push('http://localhost:3002');
+    }
     if (origin && allowed.some((a) => origin.replace(/\/$/, '') === a.replace(/\/$/, ''))) {
       return origin;
     }
-    // Allow requests with no origin (server-to-server, CLI, webhook)
     if (!origin) return liffUrl || '';
     return null as unknown as string;
   },
@@ -164,6 +192,17 @@ h1{font-size:28px;font-weight:800;margin-bottom:8px}
 </div>
 </body>
 </html>`);
+});
+
+// ─── Startup Env Validation (logs warning, doesn't block) ────
+app.use('*', async (c, next) => {
+  if (!c.env.LINE_CHANNEL_SECRET || !c.env.LINE_CHANNEL_ACCESS_TOKEN) {
+    console.warn('⚠️ LINE credentials not set — webhook/messaging will fail');
+  }
+  if (!c.env.API_KEY) {
+    console.warn('⚠️ API_KEY not set — admin auth will fail');
+  }
+  await next();
 });
 
 // 404 fallback
