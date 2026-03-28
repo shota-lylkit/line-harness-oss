@@ -19,6 +19,7 @@ export * from './reviews';
 export * from './credit-score';
 export * from './payroll';
 export * from './admin-auth';
+export * from './notification-retry';
 
 /**
  * Thin wrapper around D1Database.

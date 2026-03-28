@@ -6,6 +6,7 @@ import { processStepDeliveries } from './services/step-delivery.js';
 import { processScheduledBroadcasts } from './services/broadcast.js';
 import { checkAccountHealth } from './services/ban-monitor.js';
 import { processJobReminders } from './services/job-reminders.js';
+import { processNotificationRetries } from './services/notification-retry.js';
 import { authMiddleware } from './middleware/auth.js';
 import { auditMiddleware } from './middleware/audit.js';
 import { liffAuthMiddleware } from './middleware/liff-auth.js';
@@ -37,6 +38,7 @@ export type Env = {
     LINE_CHANNEL_SECRET: string;
     LINE_CHANNEL_ACCESS_TOKEN: string;
     API_KEY: string;
+    JWT_SECRET?: string;
     LIFF_URL: string;
     LIFF_LINE_URL?: string;
     LINE_CHANNEL_ID: string;
@@ -195,6 +197,7 @@ async function scheduled(
       processStepDeliveries(env.DB, lineClient, env.WORKER_URL),
       processScheduledBroadcasts(env.DB, lineClient, env.WORKER_URL),
       processJobReminders(env.DB, lineClient, env.LIFF_LINE_URL || env.LIFF_URL),
+      processNotificationRetries(env.DB, lineClient),
     );
   }
   jobs.push(checkAccountHealth(env.DB, {
@@ -210,6 +213,14 @@ async function scheduled(
       jobs.push(runD1Backup(env.DB, r2));
     }
   }
+
+  // messages_log の古いレコードを自動クリーンアップ（90日超を削除）
+  jobs.push(
+    env.DB.prepare("DELETE FROM messages_log WHERE created_at < datetime('now', '-90 days')")
+      .run()
+      .then((r) => { if ((r.meta?.changes ?? 0) > 0) console.log(`Cron: cleaned ${r.meta?.changes} old messages_log rows`); })
+      .catch((err) => console.error('messages_log cleanup error:', err)),
+  );
 
   const results = await Promise.allSettled(jobs);
   const failures = results

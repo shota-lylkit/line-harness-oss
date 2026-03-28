@@ -47,11 +47,20 @@ export async function processBroadcastSend(
       const excludeFriends = await getFriendsByTag(db, excludeTag.id);
       const excludeIds = new Set(excludeFriends.map(f => f.line_user_id));
 
-      // 全フォロワーを取得して園担当者を除外
-      const allFriendsResult = await db.prepare(
-        'SELECT id, line_user_id FROM friends WHERE is_following = 1'
-      ).all<{ id: string; line_user_id: string }>();
-      const targetFriends = allFriendsResult.results.filter(f => !excludeIds.has(f.line_user_id));
+      // 全フォロワーをページネーションで取得して園担当者を除外
+      const PAGE_SIZE = 2000;
+      const targetFriends: { id: string; line_user_id: string }[] = [];
+      let offset = 0;
+      while (true) {
+        const page = await db.prepare(
+          'SELECT id, line_user_id FROM friends WHERE is_following = 1 LIMIT ? OFFSET ?'
+        ).bind(PAGE_SIZE, offset).all<{ id: string; line_user_id: string }>();
+        for (const f of page.results) {
+          if (!excludeIds.has(f.line_user_id)) targetFriends.push(f);
+        }
+        if (page.results.length < PAGE_SIZE) break;
+        offset += PAGE_SIZE;
+      }
       totalCount = targetFriends.length;
 
       // multicast でバッチ送信

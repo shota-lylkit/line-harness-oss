@@ -115,26 +115,88 @@ export async function getBookingsInRange(db: D1Database, connectionId: string, s
 
 // --- 承認制フロー ---
 
-export async function approveBooking(db: D1Database, id: string, note?: string): Promise<void> {
+export async function approveBooking(db: D1Database, id: string, note?: string): Promise<boolean> {
   const now = jstNow();
-  await db
-    .prepare(`UPDATE calendar_bookings SET approval_status = 'approved', approved_at = ?, approval_note = ?, status = 'confirmed', updated_at = ? WHERE id = ?`)
+  const result = await db
+    .prepare(`UPDATE calendar_bookings SET approval_status = 'approved', approved_at = ?, approval_note = ?, status = 'confirmed', updated_at = ? WHERE id = ? AND approval_status = 'pending'`)
     .bind(now, note ?? null, now, id)
     .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
-export async function denyBooking(db: D1Database, id: string, note?: string): Promise<void> {
+export async function denyBooking(db: D1Database, id: string, note?: string): Promise<boolean> {
   const now = jstNow();
-  await db
-    .prepare(`UPDATE calendar_bookings SET approval_status = 'denied', approved_at = ?, approval_note = ?, status = 'cancelled', updated_at = ? WHERE id = ?`)
+  const result = await db
+    .prepare(`UPDATE calendar_bookings SET approval_status = 'denied', approved_at = ?, approval_note = ?, status = 'cancelled', updated_at = ? WHERE id = ? AND approval_status = 'pending'`)
     .bind(now, note ?? null, now, id)
     .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 /** 承認待ちの予約一覧を取得 */
 export async function getPendingBookings(db: D1Database): Promise<CalendarBookingRow[]> {
   const result = await db
-    .prepare(`SELECT * FROM calendar_bookings WHERE approval_status = 'pending' AND status != 'cancelled' ORDER BY start_at ASC`)
+    .prepare(`SELECT * FROM calendar_bookings WHERE approval_status = 'pending' AND status != 'cancelled' ORDER BY start_at ASC LIMIT 500`)
     .all<CalendarBookingRow>();
+  return result.results;
+}
+
+/** 承認待ち予約を job + friend 情報付きで一括取得（N+1防止） */
+export interface PendingBookingEnriched {
+  id: string;
+  friend_id: string | null;
+  job_id: string | null;
+  title: string;
+  start_at: string;
+  end_at: string;
+  status: string;
+  approval_status: string | null;
+  approval_note: string | null;
+  created_at: string;
+  check_in_at: string | null;
+  check_out_at: string | null;
+  actual_hours: number | null;
+  // job
+  nursery_name: string | null;
+  nursery_id: string | null;
+  work_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  hourly_rate: number | null;
+  address: string | null;
+  // friend
+  display_name: string | null;
+  picture_url: string | null;
+  // profile
+  real_name: string | null;
+  phone: string | null;
+  qualification_type: string | null;
+  experience_years: string | null;
+}
+
+export async function getPendingBookingsEnriched(
+  db: D1Database,
+  opts: { includeCompleted?: boolean } = {},
+): Promise<PendingBookingEnriched[]> {
+  const statusFilter = opts.includeCompleted
+    ? "cb.status != 'cancelled'"
+    : "cb.approval_status = 'pending' AND cb.status != 'cancelled'";
+  const result = await db
+    .prepare(
+      `SELECT cb.id, cb.friend_id, cb.job_id, cb.title, cb.start_at, cb.end_at,
+              cb.status, cb.approval_status, cb.approval_note, cb.created_at,
+              cb.check_in_at, cb.check_out_at, cb.actual_hours,
+              j.nursery_name, j.nursery_id, j.work_date, j.start_time, j.end_time, j.hourly_rate, j.address,
+              f.display_name, f.picture_url,
+              up.real_name, up.phone, up.qualification_type, up.experience_years
+       FROM calendar_bookings cb
+       LEFT JOIN jobs j ON j.id = cb.job_id
+       LEFT JOIN friends f ON f.id = cb.friend_id
+       LEFT JOIN user_profiles up ON up.friend_id = cb.friend_id
+       WHERE ${statusFilter}
+       ORDER BY cb.start_at DESC
+       LIMIT 500`,
+    )
+    .all<PendingBookingEnriched>();
   return result.results;
 }

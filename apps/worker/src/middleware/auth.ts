@@ -49,8 +49,9 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
 
   const token = authHeader.slice('Bearer '.length);
 
-  // 1. JWT検証を優先
-  const jwtPayload = await verifyJwt(token, c.env.API_KEY);
+  // 1. JWT検証を優先（JWT_SECRET があればそちらを使用、なければ API_KEY にフォールバック）
+  const jwtSecret = c.env.JWT_SECRET || c.env.API_KEY;
+  const jwtPayload = await verifyJwt(token, jwtSecret);
   if (jwtPayload) {
     c.set('adminId' as never, jwtPayload.sub as never);
     c.set('adminEmail' as never, jwtPayload.email as never);

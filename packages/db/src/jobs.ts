@@ -136,6 +136,37 @@ export async function getJobBookingCount(db: D1Database, jobId: string): Promise
   return result?.cnt ?? 0;
 }
 
+/**
+ * 求人の定員チェック付き予約作成（ダブルブッキング防止）
+ * D1 batchでアトミックに実行: COUNT確認 → INSERT を同一バッチで行う
+ * 戻り値: 成功時はbooking ID、定員オーバー時はnull
+ */
+export async function createBookingWithCapacityCheck(
+  db: D1Database,
+  jobId: string,
+  capacity: number,
+  input: { id: string; connectionId: string; friendId: string; title: string; startAt: string; endAt: string; jobId: string; metadata?: string },
+): Promise<string | null> {
+  const now = jstNow();
+  // D1 batch: 同一トランザクション内で実行
+  const results = await db.batch([
+    db.prepare("SELECT COUNT(*) as cnt FROM calendar_bookings WHERE job_id = ? AND status != 'cancelled'").bind(jobId),
+    db.prepare(
+      `INSERT INTO calendar_bookings (id, connection_id, friend_id, title, start_at, end_at, job_id, metadata, status, approval_status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', 'pending', ?, ?)`
+    ).bind(input.id, input.connectionId, input.friendId, input.title, input.startAt, input.endAt, input.jobId, input.metadata ?? null, now, now),
+  ]);
+  // バッチの最初のSELECTで定員チェック
+  const countResult = results[0].results as unknown as { cnt: number }[];
+  const currentCount = countResult?.[0]?.cnt ?? 0;
+  if (currentCount >= capacity) {
+    // 定員オーバー: INSERTされたものを即キャンセル
+    await db.prepare("UPDATE calendar_bookings SET status = 'cancelled', updated_at = ? WHERE id = ?").bind(now, input.id).run();
+    return null;
+  }
+  return input.id;
+}
+
 // --- 求人更新 ---
 
 export async function updateJob(

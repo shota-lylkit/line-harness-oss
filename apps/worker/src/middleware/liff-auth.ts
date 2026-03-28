@@ -89,7 +89,8 @@ export async function liffAuthMiddleware(c: Context<Env>, next: Next): Promise<R
     // API_KEY直接照合
     if (token === c.env.API_KEY) return next();
     // JWT検証（管理画面からのリクエスト）
-    const jwtPayload = await verifyJwt(token, c.env.API_KEY);
+    const jwtSecret = c.env.JWT_SECRET || c.env.API_KEY;
+    const jwtPayload = await verifyJwt(token, jwtSecret);
     if (jwtPayload) return next();
   }
 

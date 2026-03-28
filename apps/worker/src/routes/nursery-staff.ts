@@ -67,6 +67,22 @@ nurseryStaff.get('/api/nursery-staff/applicant/:friendId', async (c) => {
     }
 
     const applicantFriendId = c.req.param('friendId');
+
+    // この応募者が担当園の求人に応募しているか確認
+    const nurseryIds = nurseries.map((n) => n.nursery_id);
+    const bookingCheck = await c.env.DB
+      .prepare(
+        `SELECT 1 FROM calendar_bookings cb
+         INNER JOIN jobs j ON j.id = cb.job_id
+         WHERE cb.friend_id = ? AND j.nursery_id IN (${nurseryIds.map(() => '?').join(',')})
+         LIMIT 1`,
+      )
+      .bind(applicantFriendId, ...nurseryIds)
+      .first();
+    if (!bookingCheck) {
+      return c.json({ success: false, error: 'This applicant has no bookings for your nursery' }, 403);
+    }
+
     const profile = await getProfileByFriendId(c.env.DB, applicantFriendId);
     const documents = await getDocumentsByFriendId(c.env.DB, applicantFriendId);
 
