@@ -253,13 +253,52 @@ async function scheduled(
     }
   }
 
-  // messages_log の古いレコードを自動クリーンアップ（90日超を削除）
-  jobs.push(
-    env.DB.prepare("DELETE FROM messages_log WHERE created_at < datetime('now', '-90 days')")
-      .run()
-      .then((r) => { if ((r.meta?.changes ?? 0) > 0) console.log(`Cron: cleaned ${r.meta?.changes} old messages_log rows`); })
-      .catch((err) => console.error('messages_log cleanup error:', err)),
-  );
+  // messages_log: 90日超をR2にアーカイブしてからDBから削除（労務証跡として2年保持）
+  const messagesR2 = (env as unknown as { DOCUMENTS?: R2Bucket }).DOCUMENTS;
+  if (messagesR2) {
+    jobs.push(
+      (async () => {
+        try {
+          const cutoff = "datetime('now', '-90 days')";
+          // アーカイブ対象を取得（ページネーション）
+          const PAGE_SIZE = 2000;
+          const allRows: unknown[] = [];
+          let offset = 0;
+          while (true) {
+            const page = await env.DB.prepare(
+              `SELECT * FROM messages_log WHERE created_at < ${cutoff} LIMIT ? OFFSET ?`
+            ).bind(PAGE_SIZE, offset).all();
+            allRows.push(...page.results);
+            if (page.results.length < PAGE_SIZE) break;
+            offset += PAGE_SIZE;
+          }
+          if (allRows.length === 0) return;
+
+          // R2にアーカイブ（月別キー）
+          const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+          const monthKey = `archives/messages_log/${now.toISOString().slice(0, 7)}.json`;
+          // 既存アーカイブにマージ
+          let existing: unknown[] = [];
+          try {
+            const prev = await messagesR2.get(monthKey);
+            if (prev) existing = JSON.parse(await prev.text());
+          } catch { /* first archive for this month */ }
+          const merged = [...existing, ...allRows];
+          await messagesR2.put(monthKey, JSON.stringify(merged), {
+            httpMetadata: { contentType: 'application/json' },
+          });
+
+          // DBから削除
+          const result = await env.DB.prepare(
+            `DELETE FROM messages_log WHERE created_at < ${cutoff}`
+          ).run();
+          console.log(`Cron: archived ${allRows.length} messages to R2, deleted ${result.meta?.changes ?? 0} from DB`);
+        } catch (err) {
+          console.error('messages_log archive error:', err);
+        }
+      })(),
+    );
+  }
 
   const results = await Promise.allSettled(jobs);
   const failures = results
@@ -287,11 +326,30 @@ async function runD1Backup(db: D1Database, r2: R2Bucket): Promise<void> {
 
     // テーブル名はハードコード配列のみ（動的入力なし、SQLi安全）
     const tables = [
-      'friends', 'tags', 'friend_tags', 'auto_replies', 'scenarios', 'scenario_steps',
-      'friend_scenarios', 'broadcasts', 'messages_log', 'line_accounts', 'user_profiles',
-      'user_documents', 'favorite_nurseries', 'nurseries', 'jobs', 'calendar_bookings', 'reviews',
-      'cancellation_log',
+      // コアユーザー・プロフィール
+      'friends', 'users', 'user_profiles', 'user_documents',
+      // タグ・セグメント
+      'tags', 'friend_tags',
+      // 求人・予約・出勤
+      'nurseries', 'nursery_contacts', 'jobs', 'calendar_bookings', 'cancellation_log',
+      // 給与・支払
       'payroll_records', 'worker_payment_settings', 'withholding_tax_rates',
+      // レビュー・スコア
+      'reviews', 'scoring_rules', 'friend_scores',
+      // メッセージ・配信
+      'messages_log', 'broadcasts', 'auto_replies',
+      // シナリオ・リマインダー
+      'scenarios', 'scenario_steps', 'friend_scenarios',
+      // フォーム
+      'forms', 'form_submissions',
+      // LINE・認証
+      'line_accounts', 'admin_users', 'audit_log',
+      // 通知・リトライ
+      'notification_retries', 'notifications', 'notification_rules',
+      // お気に入り・トラッキング
+      'favorite_nurseries', 'ref_tracking', 'entry_routes',
+      // Google Calendar
+      'google_calendar_connections',
     ];
     const backup: Record<string, unknown[]> = {};
 

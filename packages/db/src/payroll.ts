@@ -1,4 +1,5 @@
 import { jstNow } from './utils.js';
+import { encryptField, decryptField } from './crypto.js';
 
 // --- Types ---
 
@@ -263,10 +264,16 @@ export async function updatePayrollMethod(
 export async function getWorkerPaymentSettings(
   db: D1Database,
   friendId: string,
+  encryptionKey?: string,
 ): Promise<WorkerPaymentSettings | null> {
-  return db.prepare(
+  const row = await db.prepare(
     `SELECT * FROM worker_payment_settings WHERE friend_id = ?`
   ).bind(friendId).first<WorkerPaymentSettings>();
+  if (!row || !encryptionKey) return row;
+  // 暗号化フィールドを復号（enc: プレフィックスがないデータはそのまま返す）
+  if (row.account_number) row.account_number = await decryptField(row.account_number, encryptionKey);
+  if (row.account_holder) row.account_holder = await decryptField(row.account_holder, encryptionKey);
+  return row;
 }
 
 export async function upsertWorkerPaymentSettings(
@@ -280,8 +287,17 @@ export async function upsertWorkerPaymentSettings(
     accountNumber?: string;
     accountHolder?: string;
   },
+  encryptionKey?: string,
 ): Promise<WorkerPaymentSettings> {
   const now = jstNow();
+  // 口座番号・口座名義を暗号化
+  const accountNumber = input.accountNumber && encryptionKey
+    ? await encryptField(input.accountNumber, encryptionKey)
+    : input.accountNumber ?? null;
+  const accountHolder = input.accountHolder && encryptionKey
+    ? await encryptField(input.accountHolder, encryptionKey)
+    : input.accountHolder ?? null;
+
   const existing = await getWorkerPaymentSettings(db, friendId);
 
   if (existing) {
@@ -300,11 +316,11 @@ export async function upsertWorkerPaymentSettings(
       input.bankName ?? null,
       input.branchName ?? null,
       input.accountType ?? null,
-      input.accountNumber ?? null,
-      input.accountHolder ?? null,
+      accountNumber,
+      accountHolder,
       now, friendId,
     ).run();
-    return (await getWorkerPaymentSettings(db, friendId))!;
+    return (await getWorkerPaymentSettings(db, friendId, encryptionKey))!;
   }
 
   const id = crypto.randomUUID();
@@ -317,8 +333,8 @@ export async function upsertWorkerPaymentSettings(
   `).bind(
     id, friendId, input.defaultPaymentMethod || 'monthly',
     input.bankName ?? null, input.branchName ?? null,
-    input.accountType ?? null, input.accountNumber ?? null,
-    input.accountHolder ?? null, now, now,
+    input.accountType ?? null, accountNumber,
+    accountHolder, now, now,
   ).run();
-  return (await getWorkerPaymentSettings(db, friendId))!;
+  return (await getWorkerPaymentSettings(db, friendId, encryptionKey))!;
 }
