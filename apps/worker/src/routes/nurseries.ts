@@ -5,6 +5,9 @@ import {
   createNursery,
   updateNursery,
   deactivateNursery,
+  getNurseryContacts,
+  addNurseryContact,
+  removeNurseryContact,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
 
@@ -201,6 +204,60 @@ nurseries.get('/api/nurseries/:id/photo/:fileName', async (c) => {
     return new Response(obj.body, { headers });
   } catch (err) {
     console.error('GET /api/nurseries/:id/photo error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// ========== 園担当者一覧（管理: API_KEY認証） ==========
+
+nurseries.get('/api/nurseries/:id/contacts', async (c) => {
+  try {
+    const contacts = await getNurseryContacts(c.env.DB, c.req.param('id'));
+    return c.json({
+      success: true,
+      data: contacts.map((ct) => ({
+        id: ct.id,
+        nurseryId: ct.nursery_id,
+        friendId: ct.friend_id,
+        lineUserId: ct.line_user_id,
+        displayName: ct.display_name,
+        role: ct.role,
+        createdAt: ct.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error('GET /api/nurseries/:id/contacts error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// ========== 園担当者追加（管理: API_KEY認証） ==========
+
+nurseries.post('/api/nurseries/:id/contacts', async (c) => {
+  try {
+    const nurseryId = c.req.param('id');
+    const nursery = await getNurseryById(c.env.DB, nurseryId);
+    if (!nursery) return c.json({ success: false, error: 'Nursery not found' }, 404);
+
+    const body = await c.req.json<{ friendId: string; role?: string }>();
+    if (!body.friendId) return c.json({ success: false, error: 'friendId is required' }, 400);
+
+    const contact = await addNurseryContact(c.env.DB, nurseryId, body.friendId, body.role);
+    return c.json({ success: true, data: contact }, 201);
+  } catch (err) {
+    console.error('POST /api/nurseries/:id/contacts error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// ========== 園担当者削除（管理: API_KEY認証） ==========
+
+nurseries.delete('/api/nurseries/:id/contacts/:friendId', async (c) => {
+  try {
+    await removeNurseryContact(c.env.DB, c.req.param('id'), c.req.param('friendId'));
+    return c.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/nurseries/:id/contacts error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

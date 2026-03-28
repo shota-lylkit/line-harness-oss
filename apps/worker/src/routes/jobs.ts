@@ -13,6 +13,8 @@ import {
   getPendingBookings,
   getFriendById,
   getNurseries,
+  getNurseryContacts,
+  getProfileByFriendId,
 } from '@line-crm/db';
 import { LineClient } from '@line-crm/line-sdk';
 import type { Env } from '../index.js';
@@ -53,7 +55,7 @@ jobs.post('/api/jobs/parse-email', async (c) => {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 4096,
+        max_tokens: 8192,
         messages: [
           {
             role: 'user',
@@ -72,6 +74,8 @@ ${JSON.stringify(nurseryList, null, 2)}
 - 業務内容があれば description に設定
 - 資格要件があれば requirements に設定
 - 1つのメールに複数日程がある場合は複数レコードに展開
+- 「毎日」「平日毎日」「月〜金」等の繰り返し表現は、該当月の全対象日を1日ずつ個別レコードに展開すること。「4月の平日毎日」なら4月1日〜30日の月〜金を全日展開する（祝日: 昭和の日4/29は除外）。省略せず全日分出力すること
+- 「休憩無し」「休憩なし」と記載があれば description に「休憩無し」と記載
 
 ## 出力形式（JSON配列のみ、説明不要）
 [{
@@ -187,10 +191,12 @@ jobs.get('/api/jobs', async (c) => {
   try {
     const status = c.req.query('status') ?? 'open';
     const fromDate = c.req.query('fromDate');
+    const toDate = c.req.query('toDate');
     const connectionId = c.req.query('connectionId');
     const items = await getJobs(c.env.DB, {
       status: status || undefined,
       fromDate: fromDate || undefined,
+      toDate: toDate || undefined,
       connectionId: connectionId || undefined,
     });
 
@@ -368,6 +374,7 @@ jobs.post('/api/jobs/batch', async (c) => {
     const body = await c.req.json<{
       jobs: Array<{
         connectionId: string;
+        nurseryId?: string;
         nurseryName: string;
         address?: string;
         station?: string;
@@ -386,8 +393,21 @@ jobs.post('/api/jobs/batch', async (c) => {
       return c.json({ success: false, error: 'jobs array is required' }, 400);
     }
 
+    // connectionId が 'default' or 未設定の場合、最初のconnectionを自動解決
+    let defaultConnectionId: string | null = null;
+    if (body.jobs.some((j) => !j.connectionId || j.connectionId === 'default')) {
+      const conn = await c.env.DB
+        .prepare('SELECT id FROM google_calendar_connections LIMIT 1')
+        .first<{ id: string }>();
+      defaultConnectionId = conn?.id ?? null;
+      if (!defaultConnectionId) {
+        return c.json({ success: false, error: 'No calendar connection found. Please create one first.' }, 400);
+      }
+    }
+
     const inputs = body.jobs.map((j) => ({
       ...j,
+      connectionId: (!j.connectionId || j.connectionId === 'default') ? defaultConnectionId! : j.connectionId,
       metadata: j.metadata ? JSON.stringify(j.metadata) : undefined,
     }));
 
@@ -543,8 +563,8 @@ jobs.post('/api/jobs/:id/book', async (c) => {
       }
     }
 
-    // ========== 管理者への承認依頼通知 ==========
-    if (c.env.ADMIN_LINE_USER_ID) {
+    // ========== 園担当者への承認依頼通知（Flex Message + 承認ボタン） ==========
+    {
       try {
         const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
         const d = new Date(job.work_date + 'T00:00:00');
@@ -554,26 +574,150 @@ jobs.post('/api/jobs/:id/book', async (c) => {
         // プロフィール情報を取得
         let applicantName = body.displayName ?? '保育士';
         let qualType = '';
+        let experienceYears = '';
+        let phone = '';
+        let age = '';
+        let gender = '';
+        let bacterialTest = '';
+        let allergiesMedical = '';
+        let healthNotes = '';
+        let completedCount = 0;
+        let docStatus = '';
+
         if (body.friendId) {
-          const { getProfileByFriendId } = await import('@line-crm/db');
+          const { getProfileByFriendId, getDocumentsByFriendId } = await import('@line-crm/db');
           const profile = await getProfileByFriendId(c.env.DB, body.friendId);
           if (profile) {
             applicantName = profile.real_name || applicantName;
-            qualType = profile.qualification_type ? `（${profile.qualification_type}）` : '';
+            qualType = profile.qualification_type || '';
+            experienceYears = profile.experience_years ? `${profile.experience_years}年` : '';
+            phone = profile.phone || '';
+            gender = profile.gender || '';
+            bacterialTest = profile.bacterial_test_status || '';
+            allergiesMedical = profile.allergies_medical || '';
+            healthNotes = profile.health_notes || '';
+            if (profile.date_of_birth) {
+              const birth = new Date(profile.date_of_birth);
+              const today = new Date();
+              let a = today.getFullYear() - birth.getFullYear();
+              if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) a--;
+              age = `${a}歳`;
+            }
+          }
+
+          // 過去の勤務実績
+          const pastResult = await c.env.DB
+            .prepare("SELECT COUNT(*) as cnt FROM calendar_bookings WHERE friend_id = ? AND approval_status = 'approved' AND start_at < datetime('now')")
+            .bind(body.friendId)
+            .first<{ cnt: number }>();
+          completedCount = pastResult?.cnt ?? 0;
+
+          // 書類提出状況
+          const docs = await getDocumentsByFriendId(c.env.DB, body.friendId);
+          const docTypes = docs.map(d => d.doc_type);
+          const hasIdFront = docTypes.includes('id_card');
+          const hasIdBack = docTypes.includes('id_card_back');
+          const hasQualCert = docTypes.includes('qualification_cert');
+          const docParts: string[] = [];
+          if (hasIdFront && hasIdBack) docParts.push('本人確認書類✓');
+          else if (hasIdFront) docParts.push('本人確認書類(表のみ)');
+          if (hasQualCert) docParts.push('資格証✓');
+          docStatus = docParts.length > 0 ? docParts.join(' / ') : '未提出';
+        }
+
+        // 応募者詳細行を組み立て
+        const detailLines: { type: string; text: string; size: string; color: string; wrap?: boolean }[] = [];
+
+        // 基本情報（資格・経験・年齢・性別を1行に）
+        const basicParts = [qualType, experienceYears, age, gender].filter(Boolean);
+        if (basicParts.length > 0) {
+          detailLines.push({ type: 'text', text: basicParts.join(' / '), size: 'sm', color: '#4b5563' });
+        }
+        if (phone) {
+          detailLines.push({ type: 'text', text: `📞 ${phone}`, size: 'sm', color: '#4b5563' });
+        }
+        if (bacterialTest) {
+          detailLines.push({ type: 'text', text: `🔬 検便: ${bacterialTest}`, size: 'sm', color: '#4b5563' });
+        }
+        if (allergiesMedical) {
+          detailLines.push({ type: 'text', text: `⚠️ ${allergiesMedical}`, size: 'sm', color: '#b45309', wrap: true });
+        }
+        if (healthNotes) {
+          detailLines.push({ type: 'text', text: `📝 ${healthNotes}`, size: 'sm', color: '#4b5563', wrap: true });
+        }
+        detailLines.push({ type: 'text', text: `📄 ${docStatus}`, size: 'sm', color: '#4b5563' });
+        detailLines.push({ type: 'text', text: `✅ 過去勤務: ${completedCount}回`, size: 'sm', color: completedCount > 0 ? '#166534' : '#4b5563' });
+
+        // Flex Message: 応募者情報 + 承認/否認ボタン
+        const flexMessage = {
+          type: 'flex' as const,
+          altText: `📋 新しい応募: ${applicantName} - ${job.nursery_name}`,
+          contents: {
+            type: 'bubble',
+            header: {
+              type: 'box', layout: 'vertical', paddingAll: '16px', backgroundColor: '#f0fdf4',
+              contents: [
+                { type: 'text', text: '📋 新しい応募が届きました', size: 'md', weight: 'bold', color: '#166534' },
+              ],
+            },
+            body: {
+              type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'md',
+              contents: [
+                { type: 'text', text: applicantName, size: 'xl', weight: 'bold', color: '#1e293b' },
+                { type: 'separator' },
+                {
+                  type: 'box', layout: 'vertical', spacing: 'sm',
+                  contents: [
+                    ...detailLines,
+                  ],
+                },
+                { type: 'separator' },
+                {
+                  type: 'box', layout: 'vertical', spacing: 'sm',
+                  contents: [
+                    { type: 'text', text: `📍 ${job.nursery_name}`, size: 'sm', color: '#1e293b', wrap: true },
+                    { type: 'text', text: `📅 ${dateStr}（${job.start_time}〜${job.end_time}）`, size: 'sm', color: '#64748b' },
+                  ],
+                },
+              ],
+            },
+            footer: {
+              type: 'box', layout: 'horizontal', paddingAll: '16px', spacing: 'md',
+              contents: [
+                {
+                  type: 'button',
+                  action: { type: 'postback', label: '✅ 承認', data: `action=approve&bookingId=${booking.id}`, displayText: '承認します' },
+                  style: 'primary', color: '#16a34a', height: 'sm',
+                },
+                {
+                  type: 'button',
+                  action: { type: 'postback', label: '❌ 否認', data: `action=deny&bookingId=${booking.id}`, displayText: '否認します' },
+                  style: 'secondary', height: 'sm',
+                },
+              ],
+            },
+          },
+        };
+
+        // 園の担当者全員に送信
+        const contacts = job.nursery_id ? await getNurseryContacts(c.env.DB, job.nursery_id) : [];
+
+        if (contacts.length > 0) {
+          for (const contact of contacts) {
+            try {
+              await lineClient.pushMessage(contact.line_user_id, [flexMessage]);
+            } catch (contactErr) {
+              console.error(`Failed to notify nursery contact ${contact.friend_id}:`, contactErr);
+            }
           }
         }
 
-        const workerUrl = c.env.WORKER_URL || 'https://line-crm-worker.spothoiku-test.workers.dev';
-        const adminUrl = `${workerUrl.replace('line-crm-worker', 'spothoiku-liff').replace('workers.dev', 'pages.dev')}?page=admin`;
-
-        await lineClient.pushMessage(c.env.ADMIN_LINE_USER_ID, [
-          {
-            type: 'text',
-            text: `📋 新しい応募が届きました！\n\n👤 ${applicantName}${qualType}\n📍 ${job.nursery_name}\n📅 ${dateStr} ${job.start_time}〜${job.end_time}\n\n管理画面で承認/否認してください:\n${adminUrl}`,
-          },
-        ]);
-      } catch (adminErr) {
-        console.error('Admin LINE notification error:', adminErr);
+        // フォールバック: 担当者が未登録の場合はADMIN_LINE_USER_IDに送信
+        if (contacts.length === 0 && c.env.ADMIN_LINE_USER_ID) {
+          await lineClient.pushMessage(c.env.ADMIN_LINE_USER_ID, [flexMessage]);
+        }
+      } catch (notifyErr) {
+        console.error('Nursery contact notification error:', notifyErr);
       }
     }
 
@@ -598,12 +742,24 @@ jobs.post('/api/jobs/:id/book', async (c) => {
 
 jobs.get('/api/bookings/pending', async (c) => {
   try {
-    const bookings = await getPendingBookings(c.env.DB);
+    const includeCompleted = c.req.query('includeCompleted') === '1';
+    let bookings;
+
+    if (includeCompleted) {
+      // レビュー画面用: 全予約を返す（pending + approved + denied）
+      const result = await c.env.DB
+        .prepare(`SELECT * FROM calendar_bookings WHERE status != 'cancelled' ORDER BY start_at DESC`)
+        .all();
+      bookings = result.results;
+    } else {
+      bookings = await getPendingBookings(c.env.DB);
+    }
+
     // Enrich with job info and friend display name
     const data = await Promise.all(
-      bookings.map(async (b) => {
-        const meta = b.metadata ? JSON.parse(b.metadata) : null;
-        const jobId = b.job_id || meta?.jobId;
+      bookings.map(async (b: Record<string, unknown>) => {
+        const meta = b.metadata ? JSON.parse(b.metadata as string) : null;
+        const jobId = (b.job_id || meta?.jobId) as string | null;
         let nurseryName = meta?.nurseryName || '';
         let workDate = '';
         let startTime = '';
@@ -621,27 +777,21 @@ jobs.get('/api/bookings/pending', async (c) => {
           }
         }
 
+        const friendId = b.friend_id as string | null;
         let displayName = '';
-        if (b.friend_id) {
-          const friend = await getFriendById(c.env.DB, b.friend_id);
-          displayName = friend?.display_name || '';
-        }
-
-        // プロフィール取得
+        let friendPictureUrl: string | null = null;
         let profile = null;
-        if (b.friend_id) {
-          const { getProfileByFriendId } = await import('@line-crm/db');
-          profile = await getProfileByFriendId(c.env.DB, b.friend_id);
-        }
 
-        // フロントのBooking型に合わせたフィールド名で返す
-        const friendPictureUrl = b.friend_id
-          ? (await getFriendById(c.env.DB, b.friend_id))?.picture_url || null
-          : null;
+        if (friendId) {
+          const friend = await getFriendById(c.env.DB, friendId);
+          displayName = friend?.display_name || '';
+          friendPictureUrl = friend?.picture_url || null;
+          profile = await getProfileByFriendId(c.env.DB, friendId);
+        }
 
         return {
           id: b.id,
-          friendId: b.friend_id,
+          friendId,
           friendDisplayName: displayName,
           friendPictureUrl,
           nurseryName,
@@ -650,6 +800,9 @@ jobs.get('/api/bookings/pending', async (c) => {
           endTime,
           hourlyRate,
           approvalStatus: b.approval_status,
+          checkInAt: b.check_in_at || null,
+          checkOutAt: b.check_out_at || null,
+          actualHours: b.actual_hours || null,
           title: b.title,
           startAt: b.start_at,
           createdAt: b.created_at,
@@ -686,37 +839,54 @@ jobs.post('/api/bookings/:id/approve', async (c) => {
 
     await approveBooking(c.env.DB, bookingId, (body as { note?: string }).note);
 
-    // LINE通知: 承認メッセージを応募者に送信
-    if (booking.friend_id) {
-      try {
+    // LINE通知: 承認メッセージを応募者 + 園担当者に送信
+    try {
+      const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+      const meta = booking.metadata ? JSON.parse(booking.metadata) : null;
+      const jobId = booking.job_id || meta?.jobId;
+      let nurseryName = meta?.nurseryName || '';
+      let dateStr = '';
+      let nurseryId: string | null = null;
+
+      if (jobId) {
+        const job = await getJobById(c.env.DB, jobId);
+        if (job) {
+          nurseryName = job.nursery_name;
+          nurseryId = job.nursery_id || null;
+          const d = new Date(job.work_date + 'T00:00:00');
+          const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+          dateStr = `${d.getMonth() + 1}月${d.getDate()}日(${weekdays[d.getDay()]}) ${job.start_time}〜${job.end_time}`;
+        }
+      }
+
+      // 応募者に通知
+      if (booking.friend_id) {
         const friend = await getFriendById(c.env.DB, booking.friend_id);
         if (friend?.line_user_id) {
-          const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
-          const meta = booking.metadata ? JSON.parse(booking.metadata) : null;
-          const jobId = booking.job_id || meta?.jobId;
-          let nurseryName = meta?.nurseryName || '';
-          let dateStr = '';
-
-          if (jobId) {
-            const job = await getJobById(c.env.DB, jobId);
-            if (job) {
-              nurseryName = job.nursery_name;
-              const d = new Date(job.work_date + 'T00:00:00');
-              const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-              dateStr = `${d.getMonth() + 1}月${d.getDate()}日(${weekdays[d.getDay()]}) ${job.start_time}〜${job.end_time}`;
-            }
-          }
-
           await lineClient.pushMessage(friend.line_user_id, [
             {
               type: 'text',
-              text: `🎉 採用が決定しました！\n\n📍 ${nurseryName}\n📅 ${dateStr}\n\nご応募ありがとうございます。当日はよろしくお願いいたします。\n\n【持ち物】\n上記は目安です。当園で2回目以降の勤務では不要です。\n・筆記具\n・動きやすい服装\n・上履き\n・エプロン\n\n※体調がすぐれない場合はお早めにご連絡ください。`,
+              text: `🎉 採用が決定しました！\n\n📍 ${nurseryName}\n📅 ${dateStr}\n\nご応募ありがとうございます。当日はよろしくお願いいたします。\n\n【持ち物】\n・筆記具\n・動きやすい服装\n・上履き\n・エプロン\n\n※体調がすぐれない場合はお早めにご連絡ください。`,
             },
           ]);
         }
-      } catch (lineErr) {
-        console.error('LINE approval notification error:', lineErr);
       }
+
+      // 園担当者全員に承認済み通知
+      if (nurseryId) {
+        const contacts = await getNurseryContacts(c.env.DB, nurseryId);
+        for (const contact of contacts) {
+          try {
+            await lineClient.pushMessage(contact.line_user_id, [
+              { type: 'text', text: `✅ 応募が承認されました。\n\n📍 ${nurseryName}\n📅 ${dateStr}` },
+            ]);
+          } catch (contactErr) {
+            console.error(`Failed to notify contact ${contact.friend_id}:`, contactErr);
+          }
+        }
+      }
+    } catch (lineErr) {
+      console.error('LINE approval notification error:', lineErr);
     }
 
     return c.json({ success: true, data: { bookingId, approvalStatus: 'approved' } });
@@ -774,6 +944,65 @@ jobs.post('/api/bookings/:id/deny', async (c) => {
     return c.json({ success: true, data: { bookingId, approvalStatus: 'denied' } });
   } catch (err) {
     console.error('POST /api/bookings/:id/deny error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+/**
+ * ワーカー自己キャンセル — 応募済みの予約をワーカーが自分でキャンセル
+ * 枠を復活させ、園への連絡を促すメッセージを送信
+ */
+jobs.post('/api/bookings/:id/cancel', async (c) => {
+  try {
+    const bookingId = c.req.param('id');
+    const booking = await getCalendarBookingById(c.env.DB, bookingId);
+    if (!booking) {
+      return c.json({ success: false, error: 'Booking not found' }, 404);
+    }
+    if (booking.status === 'cancelled') {
+      return c.json({ success: false, error: 'Already cancelled' }, 400);
+    }
+
+    const jobId = (booking as { job_id?: string }).job_id ?? null;
+    let nurseryName = '';
+
+    // 予約をキャンセル状態に更新
+    await c.env.DB
+      .prepare("UPDATE calendar_bookings SET status = 'cancelled', approval_status = 'denied' WHERE id = ?")
+      .bind(bookingId)
+      .run();
+
+    // 求人の枠を復活（filledだったらopenに戻す）
+    if (jobId) {
+      const job = await getJobById(c.env.DB, jobId);
+      if (job) {
+        nurseryName = job.nursery_name;
+        if (job.status === 'filled') {
+          await updateJobStatus(c.env.DB, jobId, 'open');
+        }
+      }
+    }
+
+    // キャンセル通知 + 園への連絡を促すメッセージ
+    try {
+      const friend = await getFriendById(c.env.DB, booking.friend_id);
+      if (friend?.line_user_id) {
+        const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+        await lineClient.pushMessage(friend.line_user_id, [{
+          type: 'text',
+          text: `キャンセルを受け付けました。\n\n${nurseryName ? `📍 ${nurseryName}\n\n` : ''}⚠️ お手数ですが、園にも直接キャンセルのご連絡をお願いいたします。\n\n今後ともスポットほいくをよろしくお願いいたします。`,
+        }]);
+      }
+    } catch (lineErr) {
+      console.error('LINE cancel notification error:', lineErr);
+    }
+
+    return c.json({
+      success: true,
+      data: { bookingId, nurseryName },
+    });
+  } catch (err) {
+    console.error('POST /api/bookings/:id/cancel error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

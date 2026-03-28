@@ -4,6 +4,7 @@ import {
   updateBroadcastStatus,
   getFriendsByTag,
   jstNow,
+  getOrCreateTagByName,
 } from '@line-crm/db';
 import type { Broadcast } from '@line-crm/db';
 import type { LineClient } from '@line-crm/line-sdk';
@@ -41,11 +42,42 @@ export async function processBroadcastSend(
 
   try {
     if (broadcast.target_type === 'all') {
-      // Use LINE broadcast API (sends to all followers)
-      await lineClient.broadcast([message]);
-      // We don't have exact count for broadcast API, set as 0 (unknown)
-      totalCount = 0;
-      successCount = 0;
+      // 園担当者を除外するため multicast を使用（broadcast APIだとフィルタ不可）
+      const excludeTag = await getOrCreateTagByName(db, '園担当者', '#F97316');
+      const excludeFriends = await getFriendsByTag(db, excludeTag.id);
+      const excludeIds = new Set(excludeFriends.map(f => f.line_user_id));
+
+      // 全フォロワーを取得して園担当者を除外
+      const allFriendsResult = await db.prepare(
+        'SELECT id, line_user_id FROM friends WHERE is_following = 1'
+      ).all<{ id: string; line_user_id: string }>();
+      const targetFriends = allFriendsResult.results.filter(f => !excludeIds.has(f.line_user_id));
+      totalCount = targetFriends.length;
+
+      // multicast でバッチ送信
+      const now = jstNow();
+      for (let i = 0; i < targetFriends.length; i += MULTICAST_BATCH_SIZE) {
+        const batch = targetFriends.slice(i, i + MULTICAST_BATCH_SIZE);
+        const lineUserIds = batch.map(f => f.line_user_id);
+        if (i > 0) {
+          const { calculateStaggerDelay, sleep } = await import('./stealth.js');
+          const delay = calculateStaggerDelay(targetFriends.length, Math.floor(i / MULTICAST_BATCH_SIZE));
+          await sleep(delay);
+        }
+        try {
+          await lineClient.multicast(lineUserIds, [message]);
+          successCount += batch.length;
+          for (const friend of batch) {
+            const logId = crypto.randomUUID();
+            await db.prepare(
+              `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+               VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`
+            ).bind(logId, friend.id, broadcast.message_type, broadcast.message_content, broadcastId, now).run();
+          }
+        } catch (err) {
+          console.error(`Multicast batch failed:`, err);
+        }
+      }
     } else if (broadcast.target_type === 'tag') {
       if (!broadcast.target_tag_id) {
         throw new Error('target_tag_id is required for tag-targeted broadcasts');

@@ -37,6 +37,7 @@ export type Env = {
     LINE_CHANNEL_ACCESS_TOKEN: string;
     API_KEY: string;
     LIFF_URL: string;
+    LIFF_LINE_URL?: string;
     LINE_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
@@ -189,7 +190,7 @@ async function scheduled(
     jobs.push(
       processStepDeliveries(env.DB, lineClient, env.WORKER_URL),
       processScheduledBroadcasts(env.DB, lineClient, env.WORKER_URL),
-      processJobReminders(env.DB, lineClient),
+      processJobReminders(env.DB, lineClient, env.LIFF_LINE_URL || env.LIFF_URL),
     );
   }
   jobs.push(checkAccountHealth(env.DB, {

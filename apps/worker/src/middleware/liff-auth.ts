@@ -10,6 +10,7 @@
 import { getFriendByLineUserId, getLineAccounts } from '@line-crm/db';
 import type { Context, Next } from 'hono';
 import type { Env } from '../index.js';
+import { verifyJwt } from './jwt.js';
 
 // キャッシュ: IDトークン → { lineUserId, friendId, expiresAt }
 // Workers は isolate 単位でメモリを共有するため、短期キャッシュとして有効
@@ -81,10 +82,15 @@ export async function verifyLiffToken(
  * トークンがない/無効な場合は 401 を返す。
  */
 export async function liffAuthMiddleware(c: Context<Env>, next: Next): Promise<Response | void> {
-  // API_KEY認証済みリクエスト（管理画面）はスキップ
+  // 管理者認証済みリクエストはスキップ（JWT or API_KEY）
   const authHeader = c.req.header('Authorization');
-  if (authHeader?.startsWith('Bearer ') && authHeader.slice(7) === c.env.API_KEY) {
-    return next();
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    // API_KEY直接照合
+    if (token === c.env.API_KEY) return next();
+    // JWT検証（管理画面からのリクエスト）
+    const jwtPayload = await verifyJwt(token, c.env.API_KEY);
+    if (jwtPayload) return next();
   }
 
   const token = c.req.header('X-LIFF-Token');

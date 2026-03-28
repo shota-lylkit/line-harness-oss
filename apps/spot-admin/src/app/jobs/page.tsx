@@ -12,19 +12,36 @@ const statusOptions = [
   { value: 'cancelled', label: 'キャンセル' },
 ]
 
+function getMonthOptions() {
+  const options: { value: string; label: string }[] = [{ value: '', label: 'すべての月' }]
+  const now = new Date()
+  // 前月〜6ヶ月先まで
+  for (let i = -1; i <= 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    options.push({ value: val, label: `${d.getFullYear()}年${d.getMonth() + 1}月` })
+  }
+  return options
+}
+
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [dateFilter, setDateFilter] = useState('')
+  const [monthFilter, setMonthFilter] = useState('')
 
   const fetchJobs = useCallback(async () => {
     setLoading(true)
     try {
-      const params: { status?: string; fromDate?: string } = {}
+      const params: { status?: string; fromDate?: string; toDate?: string } = {}
       if (statusFilter) params.status = statusFilter
-      if (dateFilter) params.fromDate = dateFilter
+      if (monthFilter) {
+        const [year, month] = monthFilter.split('-').map(Number)
+        params.fromDate = `${year}-${String(month).padStart(2, '0')}-01`
+        const lastDay = new Date(year, month, 0).getDate()
+        params.toDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+      }
       const res = await api.jobs.list(params)
       if (res.success) setJobs(res.data)
     } catch {
@@ -32,7 +49,7 @@ export default function JobsPage() {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, dateFilter])
+  }, [statusFilter, monthFilter])
 
   useEffect(() => { fetchJobs() }, [fetchJobs])
 
@@ -82,17 +99,15 @@ export default function JobsPage() {
             </button>
           ))}
         </div>
-        <input
-          type="date"
-          value={dateFilter}
-          onChange={(e) => setDateFilter(e.target.value)}
+        <select
+          value={monthFilter}
+          onChange={(e) => setMonthFilter(e.target.value)}
           className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-        />
-        {dateFilter && (
-          <button onClick={() => setDateFilter('')} className="text-xs text-gray-500 hover:text-gray-700">
-            日付クリア
-          </button>
-        )}
+        >
+          {getMonthOptions().map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}

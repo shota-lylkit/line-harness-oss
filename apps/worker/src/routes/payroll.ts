@@ -60,6 +60,97 @@ payroll.get('/api/payroll/admin/list', async (c) => {
   }
 });
 
+// ========== 管理者向け: 勤務済みワーカー一覧（API_KEY/JWT認証） ==========
+
+payroll.get('/api/payroll/admin/workers', async (c) => {
+  try {
+    const month = c.req.query('month'); // YYYY-MM
+    const nurseryName = c.req.query('nurseryName');
+
+    let sql = `
+      SELECT
+        b.id as booking_id,
+        b.friend_id,
+        f.display_name as friend_display_name,
+        f.picture_url as friend_picture_url,
+        j.nursery_name,
+        j.work_date,
+        j.start_time,
+        j.end_time,
+        j.hourly_rate,
+        b.actual_hours,
+        b.check_in_at,
+        b.check_out_at,
+        p.real_name,
+        p.phone,
+        p.qualification_type,
+        ws.bank_name,
+        ws.branch_name,
+        ws.account_type,
+        ws.account_number,
+        ws.account_holder
+      FROM calendar_bookings b
+      JOIN friends f ON b.friend_id = f.id
+      JOIN jobs j ON b.job_id = j.id
+      LEFT JOIN user_profiles p ON b.friend_id = p.friend_id
+      LEFT JOIN worker_payment_settings ws ON b.friend_id = ws.friend_id
+      WHERE b.approval_status = 'approved' AND b.check_out_at IS NOT NULL
+    `;
+    const binds: string[] = [];
+
+    if (month) {
+      sql += ` AND j.work_date LIKE ?`;
+      binds.push(`${month}%`);
+    }
+    if (nurseryName) {
+      sql += ` AND j.nursery_name = ?`;
+      binds.push(nurseryName);
+    }
+
+    sql += ` ORDER BY j.work_date DESC, j.start_time ASC LIMIT 500`;
+
+    const stmt = c.env.DB.prepare(sql);
+    const result = await (binds.length > 0 ? stmt.bind(...binds) : stmt).all();
+
+    // 園名のユニーク一覧も返す（フィルター用）
+    const nurseryResult = await c.env.DB.prepare(
+      `SELECT DISTINCT j.nursery_name FROM calendar_bookings b JOIN jobs j ON b.job_id = j.id WHERE b.approval_status = 'approved' AND b.check_out_at IS NOT NULL ORDER BY j.nursery_name`
+    ).all();
+
+    return c.json({
+      success: true,
+      data: {
+        workers: result.results.map((r: Record<string, unknown>) => ({
+          bookingId: r.booking_id,
+          friendId: r.friend_id,
+          displayName: r.friend_display_name || '',
+          pictureUrl: r.friend_picture_url || null,
+          realName: r.real_name || null,
+          phone: r.phone || null,
+          qualificationType: r.qualification_type || null,
+          nurseryName: r.nursery_name || '',
+          workDate: r.work_date || '',
+          startTime: r.start_time || '',
+          endTime: r.end_time || '',
+          hourlyRate: r.hourly_rate || 0,
+          actualHours: r.actual_hours || null,
+          checkInAt: r.check_in_at || null,
+          checkOutAt: r.check_out_at || null,
+          bankName: r.bank_name || null,
+          branchName: r.branch_name || null,
+          accountType: r.account_type || null,
+          accountNumber: r.account_number || null,
+          accountHolder: r.account_holder || null,
+        })),
+        nurseries: nurseryResult.results.map((r: Record<string, unknown>) => r.nursery_name as string),
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/payroll/admin/workers error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 // ========== ワーカー向け: 報酬明細一覧（LIFF認証） ==========
 
 payroll.get('/api/payroll/:friendId', async (c) => {

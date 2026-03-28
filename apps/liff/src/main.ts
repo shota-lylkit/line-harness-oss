@@ -20,6 +20,7 @@ import { initJobs } from './jobs.js';
 import { initAdmin } from './admin.js';
 import { initMypage } from './mypage.js';
 import { initCheckin } from './checkin.js';
+import { initReview } from './review.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -58,6 +59,24 @@ function apiCall(path: string, options?: RequestInit): Promise<Response> {
   });
 }
 
+/**
+ * Parse query params, including LIFF's liff.state encoding.
+ * LIFF v2 moves original query params into ?liff.state=<encoded>.
+ */
+function getLiffParams(): URLSearchParams {
+  const params = new URLSearchParams(window.location.search);
+  const liffState = params.get('liff.state');
+  if (liffState) {
+    // liff.state contains the original query string (with leading '?' sometimes)
+    const stateParams = new URLSearchParams(liffState.replace(/^\?/, ''));
+    // Merge: liff.state params take precedence
+    for (const [key, value] of stateParams) {
+      params.set(key, value);
+    }
+  }
+  return params;
+}
+
 function getPage(): string | null {
   const path = window.location.pathname.replace(/^\/+/, '');
   if (path === 'book') return 'book';
@@ -65,18 +84,17 @@ function getPage(): string | null {
   if (path === 'mypage') return 'mypage';
   if (path === 'checkin') return 'checkin';
   if (path === 'admin') return 'admin';
-  const params = new URLSearchParams(window.location.search);
+  if (path === 'review') return 'review';
+  const params = getLiffParams();
   return params.get('page');
 }
 
 function getRedirectUrl(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('redirect');
+  return getLiffParams().get('redirect');
 }
 
 function getRef(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('ref');
+  return getLiffParams().get('ref');
 }
 
 function getSavedUuid(): string | null {
@@ -286,6 +304,8 @@ async function main() {
       await initJobs();
     } else if (page === 'mypage') {
       await initMypage();
+    } else if (page === 'review') {
+      await initReview();
     } else if (page === 'checkin') {
       await initCheckin();
     } else if (page === 'book') {

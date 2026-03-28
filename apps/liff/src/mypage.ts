@@ -84,6 +84,14 @@ interface PayrollSummary {
   recordCount: number;
 }
 
+interface BankAccountData {
+  bankName: string;
+  branchName: string;
+  accountType: 'ordinary' | 'current';
+  accountNumber: string;
+  accountHolder: string;
+}
+
 interface MypageState {
   friendId: string | null;
   displayName: string;
@@ -95,6 +103,11 @@ interface MypageState {
   profile: ProfileData | null;
   payrollRecords: PayrollRecord[];
   payrollSummary: PayrollSummary | null;
+  bankAccount: BankAccountData | null;
+  editingBank: boolean;
+  bankForm: BankAccountData;
+  bankSaving: boolean;
+  bankError: string;
   loading: boolean;
   activeTab: 'active' | 'past' | 'earnings' | 'profile';
 }
@@ -110,6 +123,11 @@ const state: MypageState = {
   profile: null,
   payrollRecords: [],
   payrollSummary: null,
+  bankAccount: null,
+  editingBank: false,
+  bankForm: { bankName: '', branchName: '', accountType: 'ordinary', accountNumber: '', accountHolder: '' },
+  bankSaving: false,
+  bankError: '',
   loading: true,
   activeTab: 'active',
 };
@@ -260,6 +278,66 @@ function render(): void {
     <a href="https://liff.line.me/${LIFF_ID}?page=jobs&view=profile" class="btn-edit-profile">プロフィールを登録する</a>
   `;
 
+  const accountTypeLabel: Record<string, string> = { ordinary: '普通', current: '当座' };
+
+  const bankSection = state.editingBank ? `
+    <div class="bank-section">
+      <h3 class="section-title">口座情報の登録</h3>
+      ${state.bankError ? `<div class="bank-error">${escapeHtml(state.bankError)}</div>` : ''}
+      <div class="bank-form">
+        <div class="form-group">
+          <label>銀行名</label>
+          <input type="text" id="bankName" value="${escapeHtml(state.bankForm.bankName)}" placeholder="例: 三菱UFJ銀行" />
+        </div>
+        <div class="form-group">
+          <label>支店名</label>
+          <input type="text" id="branchName" value="${escapeHtml(state.bankForm.branchName)}" placeholder="例: 新宿支店" />
+        </div>
+        <div class="form-group">
+          <label>口座種別</label>
+          <select id="accountType">
+            <option value="ordinary" ${state.bankForm.accountType === 'ordinary' ? 'selected' : ''}>普通</option>
+            <option value="current" ${state.bankForm.accountType === 'current' ? 'selected' : ''}>当座</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>口座番号（7桁）</label>
+          <input type="text" id="accountNumber" value="${escapeHtml(state.bankForm.accountNumber)}" placeholder="1234567" inputmode="numeric" maxlength="7" />
+        </div>
+        <div class="form-group">
+          <label>口座名義（カタカナ）</label>
+          <input type="text" id="accountHolder" value="${escapeHtml(state.bankForm.accountHolder)}" placeholder="例: ヤマダ タロウ" />
+        </div>
+        <div class="bank-buttons">
+          <button class="btn-bank-cancel" id="bankCancelBtn">キャンセル</button>
+          <button class="btn-bank-save ${state.bankSaving ? 'disabled' : ''}" id="bankSaveBtn" ${state.bankSaving ? 'disabled' : ''}>
+            ${state.bankSaving ? '保存中...' : '保存する'}
+          </button>
+        </div>
+      </div>
+    </div>
+  ` : state.bankAccount ? `
+    <div class="bank-section">
+      <h3 class="section-title">登録口座情報</h3>
+      <div class="profile-info">
+        <div class="profile-row"><span class="label">銀行名</span><span>${escapeHtml(state.bankAccount.bankName)}</span></div>
+        <div class="profile-row"><span class="label">支店名</span><span>${escapeHtml(state.bankAccount.branchName)}</span></div>
+        <div class="profile-row"><span class="label">口座種別</span><span>${accountTypeLabel[state.bankAccount.accountType] || state.bankAccount.accountType}</span></div>
+        <div class="profile-row"><span class="label">口座番号</span><span>${escapeHtml(state.bankAccount.accountNumber)}</span></div>
+        <div class="profile-row"><span class="label">口座名義</span><span>${escapeHtml(state.bankAccount.accountHolder)}</span></div>
+      </div>
+      <button class="btn-edit-profile" id="bankEditBtn" style="border:none;cursor:pointer;">口座情報を変更する</button>
+    </div>
+  ` : `
+    <div class="bank-section">
+      <h3 class="section-title">登録口座情報</h3>
+      <div class="profile-info">
+        <p>口座情報が未登録です。報酬のお振込に必要です。</p>
+      </div>
+      <button class="btn-edit-profile" id="bankEditBtn" style="border:none;cursor:pointer;">口座情報を登録する</button>
+    </div>
+  `;
+
   const earningsSection = state.payrollSummary
     ? renderPayrollSummary(state.payrollSummary) + (
         state.payrollRecords.length > 0
@@ -311,7 +389,7 @@ function render(): void {
             : '<div class="empty-state">まだ勤務履歴がありません</div>'
         ) : ''}
         ${state.activeTab === 'earnings' ? earningsSection : ''}
-        ${state.activeTab === 'profile' ? profileSection : ''}
+        ${state.activeTab === 'profile' ? profileSection + bankSection : ''}
       </div>
     </div>
     ${renderBottomNav('mypage')}
@@ -324,6 +402,77 @@ function render(): void {
       render();
     });
   });
+
+  // 口座編集イベント
+  document.getElementById('bankEditBtn')?.addEventListener('click', () => {
+    state.editingBank = true;
+    if (state.bankAccount) {
+      state.bankForm = { ...state.bankAccount };
+    } else {
+      state.bankForm = { bankName: '', branchName: '', accountType: 'ordinary', accountNumber: '', accountHolder: '' };
+    }
+    render();
+  });
+
+  document.getElementById('bankCancelBtn')?.addEventListener('click', () => {
+    state.editingBank = false;
+    state.bankError = '';
+    render();
+  });
+
+  document.getElementById('bankSaveBtn')?.addEventListener('click', handleSaveBank);
+
+  // フォーム入力のリアルタイム同期
+  ['bankName', 'branchName', 'accountNumber', 'accountHolder'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('input', (e) => {
+      (state.bankForm as unknown as Record<string, string>)[id] = (e.target as HTMLInputElement).value;
+    });
+  });
+  document.getElementById('accountType')?.addEventListener('change', (e) => {
+    state.bankForm.accountType = (e.target as HTMLSelectElement).value as 'ordinary' | 'current';
+  });
+}
+
+async function handleSaveBank(): Promise<void> {
+  if (state.bankSaving || !state.friendId) return;
+
+  const f = state.bankForm;
+  if (!f.bankName || !f.branchName || !f.accountNumber || !f.accountHolder) {
+    state.bankError = 'すべての項目を入力してください';
+    render();
+    return;
+  }
+  if (!/^\d{7}$/.test(f.accountNumber)) {
+    state.bankError = '口座番号は7桁の数字で入力してください';
+    render();
+    return;
+  }
+
+  state.bankSaving = true;
+  state.bankError = '';
+  render();
+
+  try {
+    const res = await apiCall(`/api/payment-settings/${state.friendId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        bankName: f.bankName,
+        branchName: f.branchName,
+        accountType: f.accountType,
+        accountNumber: f.accountNumber,
+        accountHolder: f.accountHolder,
+      }),
+    });
+    if (!res.ok) throw new Error('保存に失敗しました');
+
+    state.bankAccount = { ...f };
+    state.editingBank = false;
+  } catch (err) {
+    state.bankError = err instanceof Error ? err.message : '保存に失敗しました';
+  } finally {
+    state.bankSaving = false;
+    render();
+  }
 }
 
 export async function initMypage(): Promise<void> {
@@ -357,11 +506,12 @@ export async function initMypage(): Promise<void> {
     return;
   }
 
-  // マイページデータ＆プロフィール＆報酬明細を並列取得
-  const [mypageRes, profileRes, payrollRes] = await Promise.all([
+  // マイページデータ＆プロフィール＆報酬明細＆口座情報を並列取得
+  const [mypageRes, profileRes, payrollRes, bankRes] = await Promise.all([
     apiCall(`/api/liff/mypage/${state.friendId}`).catch(() => null),
     apiCall(`/api/profiles/${state.friendId}`).catch(() => null),
     apiCall(`/api/payroll/${state.friendId}`).catch(() => null),
+    apiCall(`/api/payment-settings/${state.friendId}`).catch(() => null),
   ]);
 
   if (mypageRes?.ok) {
@@ -396,6 +546,28 @@ export async function initMypage(): Promise<void> {
     if (data.success && data.data) {
       state.payrollRecords = data.data.records;
       state.payrollSummary = data.data.summary;
+    }
+  }
+
+  if (bankRes?.ok) {
+    const data = await bankRes.json() as {
+      success: boolean;
+      data?: {
+        bank_name?: string;
+        branch_name?: string;
+        account_type?: string;
+        account_number?: string;
+        account_holder?: string;
+      };
+    };
+    if (data.success && data.data?.bank_name) {
+      state.bankAccount = {
+        bankName: data.data.bank_name || '',
+        branchName: data.data.branch_name || '',
+        accountType: (data.data.account_type as 'ordinary' | 'current') || 'ordinary',
+        accountNumber: data.data.account_number || '',
+        accountHolder: data.data.account_holder || '',
+      };
     }
   }
 
@@ -459,6 +631,19 @@ function injectStyles(): void {
     .payroll-summary-row { display: flex; justify-content: space-between; font-size: 14px; padding: 6px 0; border-bottom: 1px solid #f8f8f8; }
     .payroll-summary-row:last-of-type { border-bottom: none; }
     .payroll-status-row { display: flex; gap: 16px; justify-content: center; margin-top: 12px; font-size: 13px; }
+
+    .bank-section { margin-top: 16px; }
+    .section-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; color: #333; }
+    .bank-form { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; font-weight: 500; }
+    .form-group input, .form-group select { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; -webkit-appearance: none; }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: #f06292; box-shadow: 0 0 0 2px rgba(240,98,146,0.2); }
+    .bank-buttons { display: flex; gap: 8px; margin-top: 16px; }
+    .btn-bank-cancel { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 10px; background: #fff; font-size: 14px; font-weight: 600; color: #666; cursor: pointer; }
+    .btn-bank-save { flex: 1; padding: 12px; border: none; border-radius: 10px; background: #f06292; font-size: 14px; font-weight: 600; color: #fff; cursor: pointer; }
+    .btn-bank-save.disabled { background: #ccc; cursor: not-allowed; }
+    .bank-error { background: #fce4ec; color: #c62828; padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 10px; }
   `;
   document.head.appendChild(style);
 }

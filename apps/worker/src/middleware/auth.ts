@@ -36,6 +36,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     (path === '/api/reviews/check' && c.req.method === 'GET') ||
     path.match(/^\/api\/reviews\/stats\/[^/]+$/) ||
     path.match(/^\/api\/reviews\/target\/[^/]+$/) ||
+    path.match(/^\/api\/reviews\/nursery\/[^/]+\/stats$/) ||
     path.match(/^\/api\/credit-score\/[^/]+$/)
   ) {
     return next();

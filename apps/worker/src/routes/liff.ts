@@ -557,6 +557,46 @@ liffRoutes.post('/api/liff/link', async (c) => {
   }
 });
 
+// ─── Booking Detail (LIFF public) ────────────────────────────────
+
+// GET /api/liff/bookings/:bookingId — 予約詳細（レビューフォーム用）
+liffRoutes.get('/api/liff/bookings/:bookingId', async (c) => {
+  try {
+    const bookingId = c.req.param('bookingId');
+    const db = c.env.DB;
+
+    const booking = await db
+      .prepare(`
+        SELECT
+          cb.id, cb.friend_id, cb.job_id,
+          j.nursery_name, j.work_date, j.start_time, j.end_time, j.nursery_id
+        FROM calendar_bookings cb
+        LEFT JOIN jobs j ON cb.job_id = j.id
+        WHERE cb.id = ?
+      `)
+      .bind(bookingId)
+      .first<{
+        id: string;
+        friend_id: string;
+        job_id: string;
+        nursery_name: string;
+        work_date: string;
+        start_time: string;
+        end_time: string;
+        nursery_id: string | null;
+      }>();
+
+    if (!booking) {
+      return c.json({ success: false, error: 'Booking not found' }, 404);
+    }
+
+    return c.json({ success: true, data: booking });
+  } catch (err) {
+    console.error('GET /api/liff/bookings/:bookingId error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 // ─── My Page (LIFF public) ──────────────────────────────────────
 
 // GET /api/liff/mypage/:friendId — 応募履歴・報酬サマリ（LIFF公開）

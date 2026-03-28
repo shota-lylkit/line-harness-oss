@@ -3,7 +3,9 @@ import {
   createReview,
   getReviewByBookingAndType,
   getTargetRatingStats,
+  getNurseryRatingStats,
   getReviewsByTarget,
+  getAllReviews,
   getCalendarBookingById,
   getJobById,
   getCreditScore,
@@ -15,7 +17,7 @@ import { assertOwnFriendId } from '../middleware/liff-auth.js';
 
 const reviews = new Hono<Env>();
 
-// ========== 評価投稿（公開: LIFF用 — ワーカーが園を評価） ==========
+// ========== 評価投稿（公開: LIFF用 — ワーカーが園を評価 / 園がワーカーを評価） ==========
 
 reviews.post('/api/reviews', async (c) => {
   try {
@@ -23,16 +25,18 @@ reviews.post('/api/reviews', async (c) => {
       bookingId: string;
       reviewerType: 'worker' | 'nursery';
       reviewerId: string;
-      overallRating: number;
-      punctuality?: number;
-      communication?: number;
-      skill?: number;
-      attitude?: number;
+      // Worker→園: 4項目の平均をoverallRatingとして算出
+      wantToReturn: number;
+      jobAccuracy?: number;
+      announcementQuality?: number;
+      timeAccuracy?: number;
+      // 園→Worker: overallRating=働きぶり, wantToReturn=また来てほしいか
+      overallRating?: number;
       comment?: string;
     }>();
 
-    if (!body.bookingId || !body.reviewerType || !body.reviewerId || !body.overallRating) {
-      return c.json({ success: false, error: 'bookingId, reviewerType, reviewerId, overallRating are required' }, 400);
+    if (!body.bookingId || !body.reviewerType || !body.reviewerId || !body.wantToReturn) {
+      return c.json({ success: false, error: 'bookingId, reviewerType, reviewerId, wantToReturn are required' }, 400);
     }
 
     // LIFF認証時はレビュアーIDが自分のfriendIdであることを検証
@@ -40,8 +44,27 @@ reviews.post('/api/reviews', async (c) => {
       return c.json({ success: false, error: 'Access denied' }, 403);
     }
 
-    if (body.overallRating < 1 || body.overallRating > 5) {
-      return c.json({ success: false, error: 'overallRating must be between 1 and 5' }, 400);
+    // overall_ratingを算出
+    let overallRating: number;
+    if (body.reviewerType === 'worker') {
+      // Worker→園: 4項目の平均
+      const ratings = [body.wantToReturn, body.jobAccuracy, body.announcementQuality, body.timeAccuracy].filter(
+        (r): r is number => r != null,
+      );
+      if (ratings.length === 0) {
+        return c.json({ success: false, error: 'At least one rating is required' }, 400);
+      }
+      overallRating = Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10;
+    } else {
+      // 園→Worker: overallRating=働きぶり（必須）
+      if (!body.overallRating) {
+        return c.json({ success: false, error: 'overallRating is required for nursery reviews' }, 400);
+      }
+      overallRating = body.overallRating;
+    }
+
+    if (overallRating < 1 || overallRating > 5) {
+      return c.json({ success: false, error: 'Ratings must be between 1 and 5' }, 400);
     }
 
     // 予約情報を取得
@@ -58,13 +81,13 @@ reviews.post('/api/reviews', async (c) => {
     }
 
     // ターゲットIDを決定
-    // worker が評価 → ターゲットは園（job の connection_id）
-    // nursery が評価 → ターゲットはワーカー（booking の friend_id）
     const job = await getJobById(c.env.DB, jobId);
     let targetId: string;
     if (body.reviewerType === 'worker') {
-      targetId = job?.connection_id || jobId;
+      // ワーカーが評価 → ターゲットは園（nursery_id or connection_id）
+      targetId = job?.nursery_id || job?.connection_id || jobId;
     } else {
+      // 園が評価 → ターゲットはワーカー（booking の friend_id）
       targetId = booking.friend_id || '';
     }
 
@@ -74,15 +97,15 @@ reviews.post('/api/reviews', async (c) => {
       reviewerType: body.reviewerType,
       reviewerId: body.reviewerId,
       targetId,
-      overallRating: body.overallRating,
-      punctuality: body.punctuality,
-      communication: body.communication,
-      skill: body.skill,
-      attitude: body.attitude,
+      overallRating,
+      wantToReturn: body.wantToReturn,
+      jobAccuracy: body.jobAccuracy,
+      announcementQuality: body.announcementQuality,
+      timeAccuracy: body.timeAccuracy,
       comment: body.comment,
     });
 
-    // ワーカーの評価投稿時、勤務完了として信用スコアを+1（チェックアウト済みの場合）
+    // ワーカーの評価投稿時、勤務完了として信用スコアを+1
     if (body.reviewerType === 'worker' && booking.friend_id) {
       await processCompletion(c.env.DB, booking.friend_id);
     }
@@ -95,7 +118,6 @@ reviews.post('/api/reviews', async (c) => {
 });
 
 // ========== 評価ステータス確認（公開: LIFF用） ==========
-// この予約に対して既に評価済みかどうか
 
 reviews.get('/api/reviews/check', async (c) => {
   try {
@@ -129,10 +151,24 @@ reviews.get('/api/reviews/check', async (c) => {
 reviews.get('/api/reviews/stats/:targetId', async (c) => {
   try {
     const targetId = c.req.param('targetId');
-    const stats = await getTargetRatingStats(c.env.DB, targetId);
+    const reviewerType = c.req.query('reviewerType') as 'worker' | 'nursery' | undefined;
+    const stats = await getTargetRatingStats(c.env.DB, targetId, reviewerType || undefined);
     return c.json({ success: true, data: stats });
   } catch (err) {
     console.error('GET /api/reviews/stats/:targetId error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// ========== 園の評価統計（nursery_idベース） ==========
+
+reviews.get('/api/reviews/nursery/:nurseryId/stats', async (c) => {
+  try {
+    const nurseryId = c.req.param('nurseryId');
+    const stats = await getNurseryRatingStats(c.env.DB, nurseryId);
+    return c.json({ success: true, data: stats });
+  } catch (err) {
+    console.error('GET /api/reviews/nursery/:nurseryId/stats error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
@@ -149,10 +185,10 @@ reviews.get('/api/reviews/target/:targetId', async (c) => {
         id: r.id,
         reviewerType: r.reviewer_type,
         overallRating: r.overall_rating,
-        punctuality: r.punctuality,
-        communication: r.communication,
-        skill: r.skill,
-        attitude: r.attitude,
+        wantToReturn: r.want_to_return,
+        jobAccuracy: r.job_accuracy,
+        announcementQuality: r.announcement_quality,
+        timeAccuracy: r.time_accuracy,
         comment: r.comment,
         createdAt: r.created_at,
       })),
@@ -163,12 +199,43 @@ reviews.get('/api/reviews/target/:targetId', async (c) => {
   }
 });
 
+// ========== 全レビュー一覧（管理: API_KEY認証） ==========
+
+reviews.get('/api/reviews', async (c) => {
+  try {
+    const items = await getAllReviews(c.env.DB);
+    return c.json({
+      success: true,
+      data: items.map((r) => ({
+        id: r.id,
+        bookingId: r.booking_id,
+        jobId: r.job_id,
+        reviewerType: r.reviewer_type,
+        reviewerId: r.reviewer_id,
+        targetId: r.target_id,
+        overallRating: r.overall_rating,
+        wantToReturn: r.want_to_return,
+        jobAccuracy: r.job_accuracy,
+        announcementQuality: r.announcement_quality,
+        timeAccuracy: r.time_accuracy,
+        comment: r.comment,
+        createdAt: r.created_at,
+        nurseryName: r.nursery_name,
+        workDate: r.work_date,
+        workerName: r.friend_display_name,
+      })),
+    });
+  } catch (err) {
+    console.error('GET /api/reviews error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 // ========== 信用スコア取得（公開: LIFF用） ==========
 
 reviews.get('/api/credit-score/:friendId', async (c) => {
   try {
     const friendId = c.req.param('friendId');
-    // LIFF認証時は自分のスコアのみ閲覧可能
     if (c.get('liffFriendId') && !assertOwnFriendId(c, friendId)) {
       return c.json({ success: false, error: 'Access denied' }, 403);
     }

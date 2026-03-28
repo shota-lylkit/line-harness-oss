@@ -79,6 +79,25 @@ export type AttendanceRecord = {
   actualHours?: number | null
 }
 
+export type ReviewItem = {
+  id: string
+  bookingId: string
+  jobId: string
+  reviewerType: 'worker' | 'nursery'
+  reviewerId: string
+  targetId: string
+  overallRating: number
+  wantToReturn: number | null
+  jobAccuracy: number | null
+  announcementQuality: number | null
+  timeAccuracy: number | null
+  comment: string | null
+  createdAt: string
+  nurseryName: string | null
+  workDate: string | null
+  workerName: string | null
+}
+
 export type ParsedJob = {
   nurseryId: string | null
   nurseryName: string
@@ -91,6 +110,40 @@ export type ParsedJob = {
   requirements: string | null
   address?: string | null
   station?: string | null
+}
+
+export type NurseryContact = {
+  id: string
+  nurseryId: string
+  friendId: string
+  lineUserId: string
+  displayName: string | null
+  role: string
+  createdAt: string
+}
+
+export type Tag = {
+  id: string
+  name: string
+  color: string
+  createdAt: string
+}
+
+export type Friend = {
+  id: string
+  displayName: string | null
+  lineUserId: string
+  pictureUrl?: string | null
+  isFollowing: boolean
+  tags?: Tag[]
+}
+
+export type Message = {
+  id: string
+  direction: 'incoming' | 'outgoing'
+  messageType: string
+  content: string
+  createdAt: string
 }
 
 export type ApiResponse<T> = {
@@ -123,6 +176,13 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
       ...options?.headers,
     },
   })
+  if (res.status === 401 && typeof window !== 'undefined') {
+    // JWT期限切れ or 無効 → 自動ログアウト
+    localStorage.removeItem('spot_admin_jwt')
+    localStorage.removeItem('spot_admin_api_key')
+    window.location.href = '/login'
+    throw new Error('認証が切れました。再ログインしてください。')
+  }
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   return res.json() as Promise<T>
 }
@@ -131,10 +191,11 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
 
 export const api = {
   jobs: {
-    list: (params?: { status?: string; fromDate?: string }) => {
+    list: (params?: { status?: string; fromDate?: string; toDate?: string }) => {
       const query: Record<string, string> = {}
       if (params?.status) query.status = params.status
       if (params?.fromDate) query.fromDate = params.fromDate
+      if (params?.toDate) query.toDate = params.toDate
       return fetchApi<ApiResponse<Job[]>>('/api/jobs?' + new URLSearchParams(query))
     },
     get: (id: string) =>
@@ -221,11 +282,22 @@ export const api = {
       }),
     delete: (id: string) =>
       fetchApi<ApiResponse<void>>(`/api/nurseries/${id}`, { method: 'DELETE' }),
+    contacts: (id: string) =>
+      fetchApi<ApiResponse<NurseryContact[]>>(`/api/nurseries/${id}/contacts`),
+    addContact: (nurseryId: string, friendId: string) =>
+      fetchApi<ApiResponse<NurseryContact>>(`/api/nurseries/${nurseryId}/contacts`, {
+        method: 'POST',
+        body: JSON.stringify({ friendId }),
+      }),
+    removeContact: (nurseryId: string, friendId: string) =>
+      fetchApi<ApiResponse<void>>(`/api/nurseries/${nurseryId}/contacts/${friendId}`, {
+        method: 'DELETE',
+      }),
   },
 
   attendance: {
     qrToken: (jobId: string) =>
-      fetchApi<ApiResponse<{ token: string }>>(`/api/attendance/qr/${jobId}`),
+      fetchApi<ApiResponse<{ token: string; checkinUrl: string }>>(`/api/attendance/qr/${jobId}`),
     byJob: (jobId: string) =>
       fetchApi<ApiResponse<AttendanceRecord[]>>(`/api/attendance/job/${jobId}`),
   },
@@ -233,5 +305,62 @@ export const api = {
   friends: {
     count: () =>
       fetchApi<ApiResponse<{ count: number }>>('/api/friends/count'),
+    list: (params?: { limit?: number; offset?: number }) => {
+      const q = new URLSearchParams()
+      if (params?.limit) q.set('limit', String(params.limit))
+      if (params?.offset) q.set('offset', String(params.offset))
+      return fetchApi<ApiResponse<{ items: Friend[]; total: number }>>(`/api/friends?${q}`)
+    },
+    addTag: (friendId: string, tagId: string) =>
+      fetchApi<ApiResponse<void>>(`/api/friends/${friendId}/tags`, {
+        method: 'POST',
+        body: JSON.stringify({ tagId }),
+      }),
+    removeTag: (friendId: string, tagId: string) =>
+      fetchApi<ApiResponse<void>>(`/api/friends/${friendId}/tags/${tagId}`, {
+        method: 'DELETE',
+      }),
+    messages: (friendId: string) =>
+      fetchApi<ApiResponse<Message[]>>(`/api/friends/${friendId}/messages`),
+    sendMessage: (friendId: string, content: string) =>
+      fetchApi<ApiResponse<{ messageId: string }>>(`/api/friends/${friendId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      }),
+  },
+
+  tags: {
+    list: () =>
+      fetchApi<ApiResponse<Tag[]>>('/api/tags'),
+    create: (name: string, color?: string) =>
+      fetchApi<ApiResponse<Tag>>('/api/tags', {
+        method: 'POST',
+        body: JSON.stringify({ name, color }),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<void>>(`/api/tags/${id}`, { method: 'DELETE' }),
+  },
+
+  reviews: {
+    submit: (data: {
+      bookingId: string
+      reviewerType: 'worker' | 'nursery'
+      reviewerId: string
+      overallRating: number
+      wantToReturn: number
+      comment?: string
+    }) =>
+      fetchApi<ApiResponse<{ id: string }>>('/api/reviews', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    check: (bookingId: string, reviewerType: 'worker' | 'nursery') =>
+      fetchApi<ApiResponse<{ hasReviewed: boolean }>>(`/api/reviews/check?bookingId=${bookingId}&reviewerType=${reviewerType}`),
+    nurseryStats: (nurseryId: string) =>
+      fetchApi<ApiResponse<{ averageRating: number; totalReviews: number }>>(`/api/reviews/nursery/${nurseryId}/stats`),
+    workerStats: (friendId: string) =>
+      fetchApi<ApiResponse<{ averageRating: number; totalReviews: number }>>(`/api/reviews/stats/${friendId}?reviewerType=nursery`),
+    list: () =>
+      fetchApi<ApiResponse<ReviewItem[]>>('/api/reviews'),
   },
 }

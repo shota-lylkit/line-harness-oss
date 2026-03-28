@@ -50,6 +50,19 @@ export async function deleteTag(db: D1Database, id: string): Promise<void> {
   await db.prepare(`DELETE FROM tags WHERE id = ?`).bind(id).run();
 }
 
+export async function getOrCreateTagByName(
+  db: D1Database,
+  name: string,
+  color = '#3B82F6',
+): Promise<Tag> {
+  const existing = await db
+    .prepare('SELECT * FROM tags WHERE name = ?')
+    .bind(name)
+    .first<Tag>();
+  if (existing) return existing;
+  return createTag(db, { name, color });
+}
+
 export async function addTagToFriend(
   db: D1Database,
   friendId: string,

@@ -71,6 +71,9 @@ interface NurseryGroup {
   transportFee?: number;
   breakMinutes?: number;
   photoUrls?: string[];
+  // review stats
+  reviewAvg?: number;
+  reviewCount?: number;
 }
 
 interface UserProfile {
@@ -109,7 +112,7 @@ interface FilterState {
 }
 
 interface JobsState {
-  view: 'list' | 'nursery' | 'profile' | 'confirm' | 'success' | 'error';
+  view: 'list' | 'nursery' | 'profile' | 'bank-account' | 'confirm' | 'success' | 'error';
   allJobs: Job[];
   nurseries: NurseryGroup[];
   filteredNurseries: NurseryGroup[];
@@ -151,6 +154,15 @@ interface JobsState {
     qualificationCertFile: File | null;
     bacterialTestCertFile: File | null;
   };
+  hasBankAccount: boolean;
+  bankForm: {
+    bankName: string;
+    branchName: string;
+    accountType: 'ordinary' | 'current';
+    accountNumber: string;
+    accountHolder: string;
+  };
+  bankSaving: boolean;
 }
 
 const state: JobsState = {
@@ -193,6 +205,9 @@ const state: JobsState = {
     qualificationCertFile: null,
     bacterialTestCertFile: null,
   },
+  hasBankAccount: false,
+  bankForm: { bankName: '', branchName: '', accountType: 'ordinary', accountNumber: '', accountHolder: '' },
+  bankSaving: false,
 };
 
 function escapeHtml(str: string): string {
@@ -235,6 +250,13 @@ function formatDateFull(dateStr: string): string {
 function formatHourlyRate(rate: number | null): string {
   if (!rate) return '';
   return `${rate.toLocaleString()}円`;
+}
+
+function renderStarIcons(rating: number): string {
+  const fullStars = Math.floor(rating);
+  const halfStar = rating - fullStars >= 0.5;
+  const emptyStars = 5 - fullStars - (halfStar ? 1 : 0);
+  return '★'.repeat(fullStars) + (halfStar ? '★' : '') + '☆'.repeat(emptyStars);
 }
 
 function calcTotalPay(hourlyRate: number, startTime: string, endTime: string, breakMinutes: number = 60, transportFee: number = 0): string {
@@ -580,6 +602,7 @@ function renderList(): string {
         ${photoUrl ? `<div class="nursery-photo"><img src="${escapeHtml(photoUrl)}" alt="${escapeHtml(nursery.nurseryName)}" loading="lazy"></div>` : ''}
         ${nursery.station ? `<div class="nursery-station-badge"><span class="station-label">最寄駅</span> ${escapeHtml(nursery.station)}</div>` : ''}
         <h3 class="nursery-name">${escapeHtml(nursery.nurseryName)}</h3>
+        ${nursery.reviewCount ? `<div class="nursery-rating"><span class="nursery-rating-stars">${renderStarIcons(nursery.reviewAvg || 0)}</span> <span class="nursery-rating-value">${nursery.reviewAvg?.toFixed(1)}</span> <span class="nursery-rating-count">(${nursery.reviewCount}件)</span></div>` : ''}
         ${badges.length > 0 ? `<div class="nursery-badges">${badges.map(b => `<span class="badge">${b}</span>`).join('')}</div>` : ''}
         ${nursery.hourlyRate ? `
         <div class="nursery-rate">
@@ -750,6 +773,7 @@ function renderNurseryDetail(): string {
         <div class="nursery-detail-header">
           ${nursery.station ? `<div class="nursery-station-badge"><span class="station-label">最寄駅</span> ${escapeHtml(nursery.station)}</div>` : ''}
           <h2>${escapeHtml(nursery.nurseryName)}</h2>
+          ${nursery.reviewCount ? `<div class="nursery-rating"><span class="nursery-rating-stars">${renderStarIcons(nursery.reviewAvg || 0)}</span> <span class="nursery-rating-value">${nursery.reviewAvg?.toFixed(1)}</span> <span class="nursery-rating-count">(${nursery.reviewCount}件)</span></div>` : ''}
           ${badges.length > 0 ? `<div class="nursery-badges">${badges.map(b => `<span class="badge">${b}</span>`).join('')}</div>` : ''}
         </div>
 
@@ -983,6 +1007,53 @@ function renderProfileForm(): string {
   `;
 }
 
+// ========== Bank Account View ==========
+
+function renderBankAccount(): string {
+  const f = state.bankForm;
+  return `
+    <div class="profile-page">
+      <div class="profile-header">
+        <button class="back-btn" data-action="bank-back">← 戻る</button>
+        <h2>口座情報の登録</h2>
+        <p class="profile-sub">報酬のお振込に必要です。あとからマイページで変更もできます。</p>
+      </div>
+      <div class="profile-form">
+        <div class="form-group">
+          <label class="form-label">銀行名 <span class="required">*</span></label>
+          <input type="text" class="form-input" id="bankNameInput" value="${escapeHtml(f.bankName)}" placeholder="例: 三菱UFJ銀行" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">支店名 <span class="required">*</span></label>
+          <input type="text" class="form-input" id="branchNameInput" value="${escapeHtml(f.branchName)}" placeholder="例: 新宿支店" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">口座種別</label>
+          <select class="form-input" id="accountTypeInput">
+            <option value="ordinary" ${f.accountType === 'ordinary' ? 'selected' : ''}>普通</option>
+            <option value="current" ${f.accountType === 'current' ? 'selected' : ''}>当座</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">口座番号（7桁） <span class="required">*</span></label>
+          <input type="text" class="form-input" id="accountNumberInput" value="${escapeHtml(f.accountNumber)}" placeholder="1234567" inputmode="numeric" maxlength="7" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">口座名義（カタカナ） <span class="required">*</span></label>
+          <input type="text" class="form-input" id="accountHolderInput" value="${escapeHtml(f.accountHolder)}" placeholder="例: ヤマダ タロウ" />
+        </div>
+
+        <button class="apply-btn" id="saveBankBtn" ${state.bankSaving ? 'disabled' : ''}>
+          ${state.bankSaving ? '保存中...' : '登録して応募に進む'}
+        </button>
+        <button class="skip-btn" data-action="skip-bank" style="display:block;width:100%;text-align:center;padding:12px;margin-top:8px;background:none;border:none;color:#888;font-size:14px;cursor:pointer;text-decoration:underline;">
+          あとで登録する
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 // ========== Confirm View ==========
 
 function renderConfirm(): string {
@@ -1100,6 +1171,7 @@ function render(): void {
     case 'list': app.innerHTML = renderList(); break;
     case 'nursery': app.innerHTML = renderNurseryDetail(); break;
     case 'profile': app.innerHTML = renderProfileForm(); break;
+    case 'bank-account': app.innerHTML = renderBankAccount(); break;
     case 'confirm': app.innerHTML = renderConfirm(); break;
     case 'success': app.innerHTML = renderSuccess(); break;
     case 'error': app.innerHTML = renderError(); break;
@@ -1275,14 +1347,17 @@ function attachEvents(): void {
     window.location.href = `https://liff.line.me/${LIFF_ID}?page=mypage`;
   });
 
-  // Apply → check profile → profile form or confirm
+  // Apply → check profile → profile form / bank account / confirm
   app.querySelector('[data-action="apply"]')?.addEventListener('click', () => {
-    if (state.userProfile) {
-      // プロフィール登録済み → 確認画面へ直行
-      state.view = 'confirm';
-    } else {
+    if (!state.userProfile) {
       // 未登録 → プロフィール入力画面へ
       state.view = 'profile';
+    } else if (!state.hasBankAccount) {
+      // プロフィールあり・口座なし → 口座登録画面へ
+      state.view = 'bank-account';
+    } else {
+      // 全部登録済み → 確認画面へ直行
+      state.view = 'confirm';
     }
     render();
     window.scrollTo(0, 0);
@@ -1351,6 +1426,32 @@ function attachEvents(): void {
   // Save profile → confirm
   app.querySelector('[data-action="save-profile"]')?.addEventListener('click', () => saveProfile());
 
+  // Bank account form
+  app.querySelector('[data-action="bank-back"]')?.addEventListener('click', () => {
+    state.view = 'profile';
+    render();
+    window.scrollTo(0, 0);
+  });
+
+  app.querySelector('#saveBankBtn')?.addEventListener('click', () => saveBankAccount());
+
+  app.querySelector('[data-action="skip-bank"]')?.addEventListener('click', () => {
+    state.view = 'confirm';
+    render();
+    window.scrollTo(0, 0);
+  });
+
+  // Bank form input sync
+  ['bankNameInput', 'branchNameInput', 'accountNumberInput', 'accountHolderInput'].forEach((id) => {
+    app.querySelector(`#${id}`)?.addEventListener('input', (e) => {
+      const key = id.replace('Input', '').replace(/^(.)/, (_, c) => c.toLowerCase()) as keyof typeof state.bankForm;
+      (state.bankForm as unknown as Record<string, string>)[key] = (e.target as HTMLInputElement).value;
+    });
+  });
+  app.querySelector('#accountTypeInput')?.addEventListener('change', (e) => {
+    state.bankForm.accountType = (e.target as HTMLSelectElement).value as 'ordinary' | 'current';
+  });
+
   // Confirm apply
   app.querySelector('[data-action="confirm-apply"]')?.addEventListener('click', () => submitApplication());
 
@@ -1395,6 +1496,9 @@ async function fetchJobs(): Promise<void> {
     state.availablePrefectures = prefAreaMap.prefectures;
     state.areasByPrefecture = prefAreaMap.areasByPref;
     state.filteredNurseries = applyFilterSort(state.nurseries, state.filter);
+
+    // レビュー統計を非同期で取得（表示をブロックしない）
+    fetchNurseryReviews();
   } catch (err) {
     state.allJobs = [];
     state.nurseries = [];
@@ -1406,15 +1510,59 @@ async function fetchJobs(): Promise<void> {
   }
 }
 
+async function fetchNurseryReviews(): Promise<void> {
+  const nurseryIds = state.nurseries
+    .filter((n) => n.nurseryId)
+    .map((n) => n.nurseryId!);
+  if (!nurseryIds.length) return;
+
+  // 各園のレビュー統計を並列取得
+  const results = await Promise.allSettled(
+    nurseryIds.map(async (id) => {
+      const res = await apiCall(`/api/reviews/nursery/${id}/stats`);
+      if (!res.ok) return null;
+      const json = await res.json() as { success: boolean; data: { averageRating: number; totalReviews: number } };
+      return json.success ? { nurseryId: id, ...json.data } : null;
+    }),
+  );
+
+  let updated = false;
+  for (const result of results) {
+    if (result.status !== 'fulfilled' || !result.value) continue;
+    const { nurseryId, averageRating, totalReviews } = result.value;
+    if (totalReviews === 0) continue;
+    for (const nursery of state.nurseries) {
+      if (nursery.nurseryId === nurseryId) {
+        nursery.reviewAvg = averageRating;
+        nursery.reviewCount = totalReviews;
+        updated = true;
+      }
+    }
+  }
+  if (updated) {
+    state.filteredNurseries = applyFilterSort(state.nurseries, state.filter);
+    render();
+  }
+}
+
 async function fetchProfile(): Promise<void> {
   if (!state.friendId) return;
   try {
-    const res = await apiCall(`/api/profiles/${state.friendId}`);
-    if (res.ok) {
-      const json = await res.json() as { success: boolean; data: { profile: UserProfile | null; documents: UserDocument[] } };
+    const [profileRes, bankRes] = await Promise.all([
+      apiCall(`/api/profiles/${state.friendId}`).catch(() => null),
+      apiCall(`/api/payment-settings/${state.friendId}`).catch(() => null),
+    ]);
+    if (profileRes?.ok) {
+      const json = await profileRes.json() as { success: boolean; data: { profile: UserProfile | null; documents: UserDocument[] } };
       if (json.success) {
         state.userProfile = json.data.profile;
         state.userDocuments = json.data.documents || [];
+      }
+    }
+    if (bankRes?.ok) {
+      const json = await bankRes.json() as { success: boolean; data?: { bank_name?: string } };
+      if (json.success && json.data?.bank_name) {
+        state.hasBankAccount = true;
       }
     }
   } catch {
@@ -1546,7 +1694,12 @@ async function saveProfile(): Promise<void> {
       return;
     }
 
-    state.view = 'confirm';
+    // 口座情報が未登録なら口座入力画面へ
+    if (!state.hasBankAccount) {
+      state.view = 'bank-account';
+    } else {
+      state.view = 'confirm';
+    }
     render();
     window.scrollTo(0, 0);
   } catch (err) {
@@ -1557,6 +1710,46 @@ async function saveProfile(): Promise<void> {
     }
     alert(err instanceof Error ? err.message : '保存に失敗しました');
   }
+}
+
+async function saveBankAccount(): Promise<void> {
+  if (state.bankSaving || !state.friendId) return;
+  const f = state.bankForm;
+
+  if (!f.bankName || !f.branchName || !f.accountNumber || !f.accountHolder) {
+    alert('すべての必須項目を入力してください');
+    return;
+  }
+  if (!/^\d{7}$/.test(f.accountNumber)) {
+    alert('口座番号は7桁の数字で入力してください');
+    return;
+  }
+
+  state.bankSaving = true;
+  render();
+
+  try {
+    const res = await apiCall(`/api/payment-settings/${state.friendId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        bankName: f.bankName,
+        branchName: f.branchName,
+        accountType: f.accountType,
+        accountNumber: f.accountNumber,
+        accountHolder: f.accountHolder,
+      }),
+    });
+    if (!res.ok) throw new Error('保存に失敗しました');
+    state.hasBankAccount = true;
+  } catch (err) {
+    alert(err instanceof Error ? err.message : '保存に失敗しました');
+  } finally {
+    state.bankSaving = false;
+  }
+
+  state.view = 'confirm';
+  render();
+  window.scrollTo(0, 0);
 }
 
 async function uploadDocument(file: File, docType: string): Promise<void> {

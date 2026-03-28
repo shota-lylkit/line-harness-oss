@@ -6,6 +6,7 @@ export interface JobRow {
   id: string;
   connection_id: string;
   nursery_name: string;
+  nursery_id: string | null;
   address: string | null;
   station: string | null;
   hourly_rate: number | null;
@@ -23,6 +24,7 @@ export interface JobRow {
 
 export interface CreateJobInput {
   connectionId: string;
+  nurseryId?: string;
   nurseryName: string;
   address?: string;
   station?: string;
@@ -40,7 +42,7 @@ export interface CreateJobInput {
 
 export async function getJobs(
   db: D1Database,
-  opts: { status?: string; fromDate?: string; connectionId?: string } = {},
+  opts: { status?: string; fromDate?: string; toDate?: string; connectionId?: string } = {},
 ): Promise<JobRow[]> {
   let sql = 'SELECT * FROM jobs WHERE 1=1';
   const binds: unknown[] = [];
@@ -52,6 +54,10 @@ export async function getJobs(
   if (opts.fromDate) {
     sql += ' AND work_date >= ?';
     binds.push(opts.fromDate);
+  }
+  if (opts.toDate) {
+    sql += ' AND work_date <= ?';
+    binds.push(opts.toDate);
   }
   if (opts.connectionId) {
     sql += ' AND connection_id = ?';
@@ -76,12 +82,13 @@ export async function createJob(db: D1Database, input: CreateJobInput): Promise<
   const now = jstNow();
   await db
     .prepare(
-      `INSERT INTO jobs (id, connection_id, nursery_name, address, station, hourly_rate, description, requirements, capacity, work_date, start_time, end_time, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO jobs (id, connection_id, nursery_id, nursery_name, address, station, hourly_rate, description, requirements, capacity, work_date, start_time, end_time, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
       input.connectionId,
+      input.nurseryId ?? null,
       input.nurseryName,
       input.address ?? null,
       input.station ?? null,

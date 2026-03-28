@@ -12,6 +12,16 @@ import {
   completeFriendScenario,
   getLineAccounts,
   jstNow,
+  getCalendarBookingById,
+  approveBooking,
+  denyBooking,
+  getJobById,
+  getFriendById,
+  getNurseryContacts,
+  getProfileByFriendId,
+  getJobBookingCount,
+  updateJobStatus,
+  getNurseryById,
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
@@ -189,6 +199,181 @@ async function handleEvent(
     if (!userId) return;
 
     await updateFriendFollowStatus(db, userId, false);
+    return;
+  }
+
+  // ========== Postback: 園担当者からの承認/否認 ==========
+  if (event.type === 'postback') {
+    const userId = event.source.type === 'user' ? event.source.userId : undefined;
+    if (!userId) return;
+
+    const data = new URLSearchParams(event.postback.data);
+    const action = data.get('action');
+    const bookingId = data.get('bookingId');
+
+    if (!bookingId || (action !== 'approve' && action !== 'deny')) return;
+
+    try {
+      const booking = await getCalendarBookingById(db, bookingId);
+      if (!booking) {
+        await lineClient.replyMessage(event.replyToken, [
+          { type: 'text', text: '該当の応募が見つかりませんでした。' },
+        ]);
+        return;
+      }
+
+      // 既に処理済みチェック
+      if (booking.approval_status === 'approved' || booking.approval_status === 'denied') {
+        const statusText = booking.approval_status === 'approved' ? '承認済み' : '否認済み';
+        await lineClient.replyMessage(event.replyToken, [
+          { type: 'text', text: `この応募はすでに${statusText}です。` },
+        ]);
+        return;
+      }
+
+      const meta = booking.metadata ? JSON.parse(booking.metadata) : null;
+      const jobId = booking.job_id || meta?.jobId;
+      const job = jobId ? await getJobById(db, jobId) : null;
+
+      // 共通の日付計算
+      const d = job ? new Date(job.work_date + 'T00:00:00') : null;
+      const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+      const dateStr = d ? `${d.getMonth() + 1}月${d.getDate()}日(${weekdays[d.getDay()]})` : '';
+
+      if (action === 'approve') {
+        await approveBooking(db, bookingId);
+
+        // 承認した担当者にreplyで確認
+
+        await lineClient.replyMessage(event.replyToken, [
+          buildMessage('flex', JSON.stringify({
+            type: 'bubble',
+            body: {
+              type: 'box', layout: 'vertical', paddingAll: '20px',
+              contents: [
+                { type: 'text', text: '✅ 承認しました', size: 'lg', weight: 'bold', color: '#16a34a' },
+                { type: 'separator', margin: 'md' },
+                { type: 'text', text: `📍 ${job?.nursery_name || ''}`, size: 'sm', margin: 'md', wrap: true },
+                { type: 'text', text: `📅 ${dateStr} ${job?.start_time || ''}〜${job?.end_time || ''}`, size: 'sm', color: '#64748b', margin: 'sm' },
+                { type: 'text', text: '応募者にも採用通知を送信しました。', size: 'xs', color: '#64748b', margin: 'lg', wrap: true },
+              ],
+            },
+          })),
+        ]);
+
+        // 応募者にLINE通知（リッチ版）
+        if (booking.friend_id) {
+          const applicant = await getFriendById(db, booking.friend_id);
+          if (applicant?.line_user_id) {
+            const nursery = job?.nursery_id ? await getNurseryById(db, job.nursery_id) : null;
+            const applicantName = applicant.display_name || 'ワーカー';
+            const dateInfo = d ? `${d.getMonth() + 1}月${d.getDate()}日(${weekdays[d.getDay()]}) ${job?.start_time || ''}〜${job?.end_time || ''}` : '';
+
+            // 報酬計算
+            let payInfo = '';
+            if (job?.hourly_rate && job?.start_time && job?.end_time) {
+              const [sh, sm] = job.start_time.split(':').map(Number);
+              const [eh, em] = job.end_time.split(':').map(Number);
+              const breakMin = nursery?.break_minutes ?? 60;
+              const workMin = (eh * 60 + em) - (sh * 60 + sm) - breakMin;
+              const workHours = Math.max(workMin / 60, 0);
+              const transport = nursery?.transport_fee ?? 0;
+              const gross = Math.round(job.hourly_rate * workHours + transport);
+              const tax = Math.round(gross * 0.05105); // 源泉徴収（概算）
+              const net = gross - tax;
+              payInfo = `\n\n【報酬】\n報酬金額：¥${net.toLocaleString('ja-JP')}（時給${job.hourly_rate.toLocaleString('ja-JP')}円×${workHours.toFixed(1)}時間${transport > 0 ? `＋交通費${transport}円` : ''}）- 源泉税¥${tax.toLocaleString('ja-JP')}`;
+            }
+
+            // 園の詳細情報を組み立て
+            const sections: string[] = [];
+
+            if (nursery?.requirements) {
+              sections.push(`【持ち物・服装】\n${nursery.requirements}`);
+            } else {
+              sections.push('【持ち物】\n・動きやすい服装\n・上履き\n・エプロン');
+            }
+
+            if (nursery?.notes) {
+              sections.push(`【注意事項】\n${nursery.notes}`);
+            }
+
+            if (nursery?.access_info) {
+              sections.push(`【施設入室方法】\n${nursery.access_info}`);
+            }
+
+            if (nursery?.break_minutes != null) {
+              sections.push(`【休憩】\n${nursery.break_minutes}分`);
+            }
+
+            if (nursery?.address) {
+              sections.push(`【施設住所】\n${nursery.address}`);
+            }
+
+            const detailText = sections.join('\n\n');
+
+            await lineClient.pushMessage(applicant.line_user_id, [
+              {
+                type: 'text',
+                text: `🎉 勤務決定のお知らせ\n\n${applicantName}さん、お仕事へのご応募ありがとうございます。\nご応募いただいた下記の内容で「勤務決定」となりました。\n${applicantName}さんに来てもらう前提で、園は当日に向けて準備を始めています。\n\n【ご応募いただいた求人情報】\n📍 ${job?.nursery_name || ''}\n📅 ${dateInfo}${payInfo}\n\n${detailText}\n\n※体調がすぐれない場合はお早めにご連絡ください。`,
+              },
+            ]);
+          }
+        }
+
+        // 同じ園の他担当者にも承認済み通知
+        if (job?.nursery_id) {
+          const contacts = await getNurseryContacts(db, job.nursery_id);
+          const approverFriend = await getFriendByLineUserId(db, userId);
+          const approverName = approverFriend?.display_name || '担当者';
+
+          for (const contact of contacts) {
+            if (contact.line_user_id === userId) continue; // 承認した本人はスキップ
+            try {
+              await lineClient.pushMessage(contact.line_user_id, [
+                { type: 'text', text: `✅ ${approverName}さんが応募を承認しました。\n\n📍 ${job.nursery_name}\n📅 ${dateStr} ${job.start_time}〜${job.end_time}` },
+              ]);
+            } catch (err) {
+              console.error('Failed to notify other contact:', err);
+            }
+          }
+        }
+      } else {
+        // deny
+        await denyBooking(db, bookingId);
+
+        // capacity解放
+        if (jobId) {
+          const jobData = await getJobById(db, jobId);
+          if (jobData && jobData.status === 'filled') {
+            const count = await getJobBookingCount(db, jobId);
+            if (count < jobData.capacity) {
+              await updateJobStatus(db, jobId, 'open');
+            }
+          }
+        }
+
+        await lineClient.replyMessage(event.replyToken, [
+          { type: 'text', text: '❌ 応募を否認しました。' },
+        ]);
+
+        // 応募者に否認通知（丁寧版）
+        if (booking.friend_id) {
+          const applicant = await getFriendById(db, booking.friend_id);
+          if (applicant?.line_user_id) {
+            const applicantName = applicant.display_name || 'ワーカー';
+            const dateInfo = d ? `${d.getMonth() + 1}月${d.getDate()}日(${weekdays[d.getDay()]}) ${job?.start_time || ''}〜${job?.end_time || ''}` : '';
+            await lineClient.pushMessage(applicant.line_user_id, [
+              {
+                type: 'text',
+                text: `スポットほいく ${applicantName}さん、スポットほいくです✨\n\nこの度は以下の求人にご応募いただき、誠にありがとうございます。\n応募が多数あったため、今回の勤務は「お見送り」となりました。\n\n【ご応募いただいた求人情報】\n📍 ${job?.nursery_name || ''}\n📅 ${dateInfo}\n\nなお、今回の求人については見送りとなりましたが、別日程での応募は可能です。\n引き続きご応募いただければ幸いです。\n\nまた、他の求人にもご興味があれば、ぜひご応募をご検討ください。\nよろしくお願いいたします。`,
+              },
+            ]);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Postback handling error:', err);
+    }
     return;
   }
 

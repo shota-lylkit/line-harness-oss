@@ -10,6 +10,7 @@ account_id = "e9667eff95c3d4f3b9aa16c08004efc9"
 [vars]
 WORKER_URL = "https://line-crm-worker.spothoiku-test.workers.dev"
 LIFF_URL = "https://spothoiku-liff.pages.dev"
+LIFF_LINE_URL = "https://liff.line.me/2009592890-7BIHHO5p"
 LINE_LOGIN_CHANNEL_ID = "2009592890"
 
 [[d1_databases]]

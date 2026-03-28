@@ -1,6 +1,6 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
-import { api, type Nursery } from '@/lib/api'
+import React, { useEffect, useState, useCallback } from 'react'
+import { api, type Nursery, type NurseryContact, type Friend } from '@/lib/api'
 
 type FormData = {
   name: string
@@ -28,6 +28,15 @@ export default function NurseriesPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<FormData>(emptyForm)
   const [saving, setSaving] = useState(false)
+
+  // 担当者管理
+  const [expandedNurseryId, setExpandedNurseryId] = useState<string | null>(null)
+  const [contacts, setContacts] = useState<NurseryContact[]>([])
+  const [contactsLoading, setContactsLoading] = useState(false)
+  const [showFriendPicker, setShowFriendPicker] = useState(false)
+  const [friends, setFriends] = useState<Friend[]>([])
+  const [friendSearch, setFriendSearch] = useState('')
+  const [friendsLoading, setFriendsLoading] = useState(false)
 
   const fetchNurseries = useCallback(async () => {
     try {
@@ -98,6 +107,67 @@ export default function NurseriesPage() {
       setError('削除に失敗しました')
     }
   }
+
+  // 担当者管理
+  const toggleContacts = async (nurseryId: string) => {
+    if (expandedNurseryId === nurseryId) {
+      setExpandedNurseryId(null)
+      return
+    }
+    setExpandedNurseryId(nurseryId)
+    setContactsLoading(true)
+    try {
+      const res = await api.nurseries.contacts(nurseryId)
+      if (res.success) setContacts(res.data)
+    } catch {
+      setError('担当者の取得に失敗しました')
+    } finally {
+      setContactsLoading(false)
+    }
+  }
+
+  const openFriendPicker = async () => {
+    setShowFriendPicker(true)
+    setFriendsLoading(true)
+    try {
+      const res = await api.friends.list({ limit: 100 })
+      if (res.success) setFriends(res.data.items)
+    } catch {
+      setError('友だち一覧の取得に失敗しました')
+    } finally {
+      setFriendsLoading(false)
+    }
+  }
+
+  const addContact = async (friendId: string) => {
+    if (!expandedNurseryId) return
+    try {
+      await api.nurseries.addContact(expandedNurseryId, friendId)
+      setShowFriendPicker(false)
+      setFriendSearch('')
+      // reload contacts
+      const res = await api.nurseries.contacts(expandedNurseryId)
+      if (res.success) setContacts(res.data)
+    } catch {
+      setError('担当者の追加に失敗しました')
+    }
+  }
+
+  const removeContact = async (friendId: string) => {
+    if (!expandedNurseryId) return
+    if (!confirm('この担当者を解除しますか？')) return
+    try {
+      await api.nurseries.removeContact(expandedNurseryId, friendId)
+      const res = await api.nurseries.contacts(expandedNurseryId)
+      if (res.success) setContacts(res.data)
+    } catch {
+      setError('担当者の解除に失敗しました')
+    }
+  }
+
+  const filteredFriends = friends.filter(f =>
+    !friendSearch || (f.displayName || '').toLowerCase().includes(friendSearch.toLowerCase())
+  )
 
   const Field = ({ label, name, type = 'text', required = false }: { label: string; name: keyof FormData; type?: string; required?: boolean }) => (
     <div>
@@ -178,6 +248,58 @@ export default function NurseriesPage() {
         </div>
       )}
 
+      {/* Friend Picker Modal */}
+      {showFriendPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { setShowFriendPicker(false); setFriendSearch('') }}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[80vh] m-4 flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-200">
+              <h2 className="text-lg font-bold text-gray-900 mb-3">担当者を選択</h2>
+              <input
+                type="text"
+                placeholder="名前で検索..."
+                value={friendSearch}
+                onChange={(e) => setFriendSearch(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                autoFocus
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              {friendsLoading ? (
+                <div className="py-8 text-center text-sm text-gray-400">読み込み中...</div>
+              ) : filteredFriends.length === 0 ? (
+                <div className="py-8 text-center text-sm text-gray-400">該当する友だちがいません</div>
+              ) : (
+                filteredFriends.map((f) => {
+                  const alreadyAdded = contacts.some(ct => ct.friendId === f.id)
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => !alreadyAdded && addContact(f.id)}
+                      disabled={alreadyAdded}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${alreadyAdded ? 'opacity-40 cursor-not-allowed' : 'hover:bg-orange-50'}`}
+                    >
+                      <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 text-xs font-bold shrink-0">
+                        {(f.displayName || '?')[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{f.displayName || '名前なし'}</p>
+                        {alreadyAdded && <p className="text-xs text-gray-400">追加済み</p>}
+                      </div>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+            <div className="p-3 border-t border-gray-200">
+              <button onClick={() => { setShowFriendPicker(false); setFriendSearch('') }}
+                className="w-full py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg">
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       {loading ? (
         <div className="bg-white rounded-lg border border-gray-200">
@@ -207,21 +329,64 @@ export default function NurseriesPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {nurseries.map((n) => (
-                  <tr key={n.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <p className="text-sm font-medium text-gray-900">{n.name}</p>
-                      {n.address && <p className="text-xs text-gray-500">{n.address}</p>}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-700">{n.area || n.prefecture || '-'}</td>
-                    <td className="px-6 py-4 text-sm text-gray-700">{n.station || '-'}</td>
-                    <td className="px-6 py-4 text-sm text-gray-700">{n.nurseryType || '-'}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex gap-2">
-                        <button onClick={() => openEdit(n)} className="text-xs text-blue-600 hover:underline">編集</button>
-                        <button onClick={() => handleDelete(n.id)} className="text-xs text-red-500 hover:underline">無効化</button>
-                      </div>
-                    </td>
-                  </tr>
+                  <React.Fragment key={n.id}>
+                    <tr className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-medium text-gray-900">{n.name}</p>
+                        {n.address && <p className="text-xs text-gray-500">{n.address}</p>}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{n.area || n.prefecture || '-'}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{n.station || '-'}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{n.nurseryType || '-'}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex gap-2">
+                          <button onClick={() => toggleContacts(n.id)}
+                            className={`text-xs hover:underline ${expandedNurseryId === n.id ? 'text-orange-600 font-medium' : 'text-gray-500'}`}>
+                            担当者
+                          </button>
+                          <button onClick={() => openEdit(n)} className="text-xs text-blue-600 hover:underline">編集</button>
+                          <button onClick={() => handleDelete(n.id)} className="text-xs text-red-500 hover:underline">無効化</button>
+                        </div>
+                      </td>
+                    </tr>
+                    {expandedNurseryId === n.id && (
+                      <tr>
+                        <td colSpan={5} className="px-6 pb-4 bg-orange-50/50 border-t border-orange-100">
+                          <div className="flex items-center justify-between py-3">
+                            <h3 className="text-sm font-semibold text-gray-700">LINE担当者</h3>
+                            <button onClick={openFriendPicker}
+                              className="px-3 py-1.5 text-xs font-medium text-white rounded-md"
+                              style={{ backgroundColor: '#FF6B35' }}>
+                              + 担当者を追加
+                            </button>
+                          </div>
+                          {contactsLoading ? (
+                            <div className="py-3 text-sm text-gray-400">読み込み中...</div>
+                          ) : contacts.length === 0 ? (
+                            <div className="py-3 text-sm text-gray-400">担当者が登録されていません。追加すると応募通知がLINEで届きます。</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {contacts.map((ct) => (
+                                <div key={ct.id} className="flex items-center justify-between bg-white rounded-lg px-4 py-2.5 border border-gray-200">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-xs font-bold">
+                                      {(ct.displayName || '?')[0]}
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-medium text-gray-900">{ct.displayName || '名前なし'}</p>
+                                      <p className="text-xs text-gray-400">{ct.role}</p>
+                                    </div>
+                                  </div>
+                                  <button onClick={() => removeContact(ct.friendId)}
+                                    className="text-xs text-red-400 hover:text-red-600">解除</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

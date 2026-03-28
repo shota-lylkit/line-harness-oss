@@ -250,9 +250,9 @@ attendance.get('/api/attendance/job/:jobId', async (c) => {
           displayName = friend?.display_name || '';
         }
         return {
-          bookingId: r.booking_id,
+          id: r.booking_id,
           friendId: r.friend_id,
-          displayName,
+          friendDisplayName: displayName,
           approvalStatus: r.approval_status,
           checkInAt: r.check_in_at,
           checkOutAt: r.check_out_at,

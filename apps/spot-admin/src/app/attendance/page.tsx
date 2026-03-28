@@ -1,12 +1,28 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import { api, type Job, type AttendanceRecord } from '@/lib/api'
 
+function getMonthOptions(jobs: Job[]) {
+  const months = new Set<string>()
+  jobs.forEach((j) => {
+    const m = j.workDate.slice(0, 7) // "YYYY-MM"
+    months.add(m)
+  })
+  const sorted = Array.from(months).sort().reverse()
+  return sorted.map((m) => {
+    const [y, mo] = m.split('-')
+    return { value: m, label: `${y}年${Number(mo)}月` }
+  })
+}
+
 export default function AttendancePage() {
-  const [jobs, setJobs] = useState<Job[]>([])
+  const [allJobs, setAllJobs] = useState<Job[]>([])
   const [selectedJobId, setSelectedJobId] = useState('')
+  const [monthFilter, setMonthFilter] = useState('')
   const [records, setRecords] = useState<AttendanceRecord[]>([])
   const [qrToken, setQrToken] = useState('')
+  const [checkinUrl, setCheckinUrl] = useState('')
   const [loadingJobs, setLoadingJobs] = useState(true)
   const [loadingRecords, setLoadingRecords] = useState(false)
   const [error, setError] = useState('')
@@ -15,11 +31,30 @@ export default function AttendancePage() {
     api.jobs.list().then((res) => {
       if (res.success) {
         const sorted = res.data.sort((a, b) => b.workDate.localeCompare(a.workDate))
-        setJobs(sorted)
+        setAllJobs(sorted)
+        // デフォルトで最新月を選択
+        if (sorted.length > 0) {
+          setMonthFilter(sorted[0].workDate.slice(0, 7))
+        }
       }
       setLoadingJobs(false)
     })
   }, [])
+
+  const monthOptions = useMemo(() => getMonthOptions(allJobs), [allJobs])
+
+  const filteredJobs = useMemo(() => {
+    if (!monthFilter) return allJobs
+    return allJobs.filter((j) => j.workDate.startsWith(monthFilter))
+  }, [allJobs, monthFilter])
+
+  // 月フィルター変更時にselectedJobIdをリセット
+  useEffect(() => {
+    setSelectedJobId('')
+    setRecords([])
+    setQrToken('')
+    setCheckinUrl('')
+  }, [monthFilter])
 
   const fetchAttendance = useCallback(async (jobId: string) => {
     if (!jobId) return
@@ -35,6 +70,7 @@ export default function AttendancePage() {
       }
       if (qrRes.status === 'fulfilled' && qrRes.value.success) {
         setQrToken(qrRes.value.data.token)
+        setCheckinUrl(qrRes.value.data.checkinUrl)
       }
     } catch {
       setError('データの取得に失敗しました')
@@ -59,7 +95,7 @@ export default function AttendancePage() {
     return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
   }
 
-  const selectedJob = jobs.find((j) => j.id === selectedJobId)
+  const selectedJob = allJobs.find((j) => j.id === selectedJobId)
 
   return (
     <div>
@@ -67,25 +103,48 @@ export default function AttendancePage() {
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg">{error}</div>}
 
-      {/* Job selector */}
-      <div className="mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-1">求人を選択</label>
-        {loadingJobs ? (
-          <div className="h-10 w-full bg-gray-100 rounded-lg animate-pulse" />
-        ) : (
-          <select
-            value={selectedJobId}
-            onChange={(e) => setSelectedJobId(e.target.value)}
-            className="w-full max-w-lg px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-          >
-            <option value="">求人を選択してください</option>
-            {jobs.map((job) => (
-              <option key={job.id} value={job.id}>
-                {formatDate(job.workDate)} {job.nurseryName} {job.startTime}〜{job.endTime}
-              </option>
-            ))}
-          </select>
-        )}
+      {/* Filters */}
+      <div className="flex flex-wrap gap-4 mb-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">月</label>
+          {loadingJobs ? (
+            <div className="h-10 w-40 bg-gray-100 rounded-lg animate-pulse" />
+          ) : (
+            <select
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            >
+              <option value="">すべての月</option>
+              {monthOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div className="flex-1 min-w-[240px]">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            求人を選択
+            <span className="ml-1 text-xs text-gray-400">({filteredJobs.length}件)</span>
+          </label>
+          {loadingJobs ? (
+            <div className="h-10 w-full bg-gray-100 rounded-lg animate-pulse" />
+          ) : (
+            <select
+              value={selectedJobId}
+              onChange={(e) => setSelectedJobId(e.target.value)}
+              className="w-full max-w-lg px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            >
+              <option value="">求人を選択してください</option>
+              {filteredJobs.map((job) => (
+                <option key={job.id} value={job.id}>
+                  {formatDate(job.workDate)} {job.nurseryName} {job.startTime}〜{job.endTime}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {selectedJobId && (
@@ -93,21 +152,28 @@ export default function AttendancePage() {
           {/* Job info + QR token */}
           {selectedJob && (
             <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
-              <div className="flex flex-wrap gap-6">
-                <div>
-                  <p className="text-xs text-gray-500">園名</p>
-                  <p className="text-sm font-medium text-gray-900">{selectedJob.nurseryName}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500">日時</p>
-                  <p className="text-sm text-gray-700">{formatDate(selectedJob.workDate)} {selectedJob.startTime}〜{selectedJob.endTime}</p>
-                </div>
-                {qrToken && (
-                  <div>
-                    <p className="text-xs text-gray-500">QRトークン</p>
-                    <p className="text-sm font-mono text-gray-700 bg-gray-50 px-2 py-1 rounded">{qrToken}</p>
+              <div className="flex flex-wrap gap-6 items-start">
+                {checkinUrl && (
+                  <div className="flex-shrink-0 rounded-lg border border-gray-100 p-2 bg-white">
+                    <QRCodeSVG value={checkinUrl} size={180} />
                   </div>
                 )}
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <p className="text-xs text-gray-500">園名</p>
+                    <p className="text-sm font-medium text-gray-900">{selectedJob.nurseryName}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">日時</p>
+                    <p className="text-sm text-gray-700">{formatDate(selectedJob.workDate)} {selectedJob.startTime}〜{selectedJob.endTime}</p>
+                  </div>
+                  {qrToken && (
+                    <div>
+                      <p className="text-xs text-gray-500">QRトークン</p>
+                      <p className="text-sm font-mono text-gray-700 bg-gray-50 px-2 py-1 rounded">{qrToken}</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

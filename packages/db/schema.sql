@@ -628,19 +628,19 @@ CREATE INDEX IF NOT EXISTS idx_favorite_nurseries_friend ON favorite_nurseries (
 -- Reviews — 相互評価（園⇔ワーカー）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS reviews (
-  id             TEXT PRIMARY KEY,
-  booking_id     TEXT NOT NULL REFERENCES calendar_bookings (id) ON DELETE CASCADE,
-  job_id         TEXT NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,
-  reviewer_type  TEXT NOT NULL CHECK (reviewer_type IN ('worker', 'nursery')),
-  reviewer_id    TEXT NOT NULL,
-  target_id      TEXT NOT NULL,
-  overall_rating INTEGER NOT NULL CHECK (overall_rating BETWEEN 1 AND 5),
-  punctuality    INTEGER CHECK (punctuality BETWEEN 1 AND 5),
-  communication  INTEGER CHECK (communication BETWEEN 1 AND 5),
-  skill          INTEGER CHECK (skill BETWEEN 1 AND 5),
-  attitude       INTEGER CHECK (attitude BETWEEN 1 AND 5),
-  comment        TEXT,
-  created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+  id                    TEXT PRIMARY KEY,
+  booking_id            TEXT NOT NULL REFERENCES calendar_bookings (id) ON DELETE CASCADE,
+  job_id                TEXT NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,
+  reviewer_type         TEXT NOT NULL CHECK (reviewer_type IN ('worker', 'nursery')),
+  reviewer_id           TEXT NOT NULL,
+  target_id             TEXT NOT NULL,
+  overall_rating        REAL NOT NULL CHECK (overall_rating BETWEEN 1 AND 5),
+  want_to_return        INTEGER CHECK (want_to_return BETWEEN 1 AND 5),
+  job_accuracy          INTEGER CHECK (job_accuracy BETWEEN 1 AND 5),
+  announcement_quality  INTEGER CHECK (announcement_quality BETWEEN 1 AND 5),
+  time_accuracy         INTEGER CHECK (time_accuracy BETWEEN 1 AND 5),
+  comment               TEXT,
+  created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_reviews_booking ON reviews (booking_id);
@@ -670,3 +670,20 @@ CREATE TABLE IF NOT EXISTS cancellation_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cancellation_log_friend ON cancellation_log (friend_id);
+
+-- ============================================================
+-- Nursery Contacts — 園担当者マッピング
+-- ============================================================
+CREATE TABLE IF NOT EXISTS nursery_contacts (
+  id          TEXT PRIMARY KEY,
+  nursery_id  TEXT NOT NULL REFERENCES nurseries(id) ON DELETE CASCADE,
+  friend_id   TEXT NOT NULL REFERENCES friends(id) ON DELETE CASCADE,
+  role        TEXT NOT NULL DEFAULT 'staff',
+  is_active   INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nursery_contacts_unique ON nursery_contacts (nursery_id, friend_id);
+CREATE INDEX IF NOT EXISTS idx_nursery_contacts_nursery ON nursery_contacts (nursery_id);
+CREATE INDEX IF NOT EXISTS idx_nursery_contacts_friend ON nursery_contacts (friend_id);

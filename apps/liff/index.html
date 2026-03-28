@@ -1460,6 +1460,191 @@
       color: rgba(255,255,255,0.7);
       margin-top: 8px;
     }
+
+    /* ========== Review Page ========== */
+    .review-page {
+      padding-bottom: 24px;
+    }
+    .review-header {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .review-header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 12px;
+    }
+    .review-booking-info {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .review-nursery-name {
+      font-size: 17px;
+      font-weight: 700;
+      color: #E91E8C;
+      margin-bottom: 4px;
+    }
+    .review-date {
+      font-size: 14px;
+      color: #666;
+    }
+    .review-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 24px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .review-intro {
+      font-size: 14px;
+      color: #555;
+      text-align: center;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+    .review-item {
+      margin-bottom: 24px;
+    }
+    .review-label {
+      font-size: 15px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 4px;
+    }
+    .review-description {
+      font-size: 12px;
+      color: #999;
+      margin-bottom: 8px;
+    }
+    .review-stars {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .review-star {
+      font-size: 32px;
+      color: #ddd;
+      cursor: pointer;
+      transition: color 0.15s, transform 0.15s;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .review-star:active {
+      transform: scale(1.2);
+    }
+    .review-star.filled {
+      color: #FFC107;
+    }
+    .review-value-label {
+      font-size: 13px;
+      color: #E91E8C;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+    .review-comment {
+      width: 100%;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .review-comment:focus {
+      border-color: #E91E8C;
+    }
+    .review-submit-btn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #E91E8C, #FF6B9D);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: opacity 0.2s;
+    }
+    .review-submit-btn:active {
+      opacity: 0.8;
+    }
+    .review-submit-btn.disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .review-hint {
+      text-align: center;
+      font-size: 13px;
+      color: #999;
+      margin-top: 8px;
+    }
+    .review-complete-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #E91E8C, #FF6B9D);
+      color: #fff;
+      font-size: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+    }
+    .review-card h2 {
+      font-size: 20px;
+      margin-bottom: 12px;
+      color: #333;
+    }
+    .review-thanks {
+      font-size: 14px;
+      color: #666;
+      margin-top: 8px;
+      line-height: 1.6;
+    }
+    .review-close-btn {
+      width: 100%;
+      padding: 12px;
+      background: #f5f5f5;
+      color: #333;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 16px;
+    }
+    .review-loading {
+      text-align: center;
+      padding: 48px;
+      color: #999;
+    }
+
+    /* ========== Review Stars Display (園詳細用) ========== */
+    .nursery-rating {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 8px 0;
+    }
+    .nursery-rating-stars {
+      color: #FFC107;
+      font-size: 16px;
+      letter-spacing: 1px;
+    }
+    .nursery-rating-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: #333;
+    }
+    .nursery-rating-count {
+      font-size: 13px;
+      color: #999;
+    }
   </style>
 </head>
 <body>

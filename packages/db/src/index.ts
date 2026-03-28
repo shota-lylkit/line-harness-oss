@@ -12,6 +12,7 @@ export * from './entry-routes';
 export * from './forms';
 export * from './jobs';
 export * from './nurseries';
+export * from './nursery-contacts';
 export * from './profiles';
 export * from './attendance';
 export * from './reviews';
