@@ -24,3 +24,34 @@ bucket_name = "spothoiku-documents"
 
 [triggers]
 crons = ["*/5 * * * *"]
+
+# ─── Production Environment ───────────────────────────────────
+# Deploy: npx wrangler deploy --env production
+# Secrets: npx wrangler secret put API_KEY --env production
+#          npx wrangler secret put JWT_SECRET --env production
+#          npx wrangler secret put LINE_CHANNEL_SECRET --env production
+#          npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN --env production
+#          npx wrangler secret put LINE_LOGIN_CHANNEL_SECRET --env production
+
+[env.production]
+name = "line-crm-worker-prod"
+workers_dev = true
+
+[env.production.vars]
+WORKER_URL = "https://line-crm-worker-prod.spothoiku-test.workers.dev"
+LIFF_URL = "https://spothoiku-liff-prod.pages.dev"
+LIFF_LINE_URL = ""
+LINE_LOGIN_CHANNEL_ID = ""
+ADMIN_URL = "https://spothoiku-admin-prod.pages.dev"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "line-crm-prod"
+database_id = "7fd6bbd1-246a-410d-8601-cc4aa8d62560"
+
+[[env.production.r2_buckets]]
+binding = "DOCUMENTS"
+bucket_name = "spothoiku-documents-prod"
+
+[env.production.triggers]
+crons = ["*/5 * * * *"]
