@@ -28,6 +28,7 @@ import { profiles } from './routes/profiles.js';
 import { attendance } from './routes/attendance.js';
 import { reviews } from './routes/reviews.js';
 import { payroll } from './routes/payroll.js';
+import { nurseryStaff } from './routes/nursery-staff.js';
 import { adminAuth } from './routes/admin-auth.js';
 
 export type Env = {
@@ -100,6 +101,8 @@ app.use('/api/reviews', liffAuthMiddleware);
 app.use('/api/credit-score/*', liffAuthMiddleware);
 app.use('/api/payroll/*', liffAuthMiddleware);
 app.use('/api/payment-settings/*', liffAuthMiddleware);
+app.use('/api/nursery-staff/*', liffAuthMiddleware);
+app.use('/api/nursery-staff', liffAuthMiddleware);
 
 // Admin auth
 app.route('/', adminAuth);
@@ -125,6 +128,7 @@ app.route('/', profiles);
 app.route('/', attendance);
 app.route('/', reviews);
 app.route('/', payroll);
+app.route('/', nurseryStaff);
 
 // Short link: /r/:ref → landing page with LINE open button
 app.get('/r/:ref', (c) => {

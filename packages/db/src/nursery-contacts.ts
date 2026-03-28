@@ -91,6 +91,63 @@ export async function removeNurseryContact(
   }
 }
 
+// --- 園担当者の担当園に紐づくbooking一覧 ---
+
+export interface NurseryStaffBooking {
+  id: string;
+  friend_id: string | null;
+  job_id: string | null;
+  title: string;
+  start_at: string;
+  end_at: string;
+  status: string;
+  approval_status: string | null;
+  approval_note: string | null;
+  created_at: string;
+  // job info
+  nursery_id: string | null;
+  nursery_name: string | null;
+  work_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  hourly_rate: number | null;
+  // worker info
+  display_name: string | null;
+  picture_url: string | null;
+  check_in_at: string | null;
+  check_out_at: string | null;
+}
+
+export async function getBookingsByNurseryContact(
+  db: D1Database,
+  contactFriendId: string,
+  filter: 'pending' | 'approved' | 'all' = 'all',
+): Promise<NurseryStaffBooking[]> {
+  let statusFilter = '';
+  if (filter === 'pending') statusFilter = "AND cb.approval_status = 'pending'";
+  else if (filter === 'approved') statusFilter = "AND cb.approval_status = 'approved'";
+
+  const result = await db
+    .prepare(
+      `SELECT cb.id, cb.friend_id, cb.job_id, cb.title, cb.start_at, cb.end_at,
+              cb.status, cb.approval_status, cb.approval_note, cb.created_at,
+              j.nursery_id, j.nursery_name, j.work_date, j.start_time, j.end_time, j.hourly_rate,
+              f.display_name, f.picture_url,
+              cb.check_in_at, cb.check_out_at
+       FROM calendar_bookings cb
+       INNER JOIN jobs j ON j.id = cb.job_id
+       INNER JOIN nursery_contacts nc ON nc.nursery_id = j.nursery_id
+       LEFT JOIN friends f ON f.id = cb.friend_id
+       WHERE nc.friend_id = ? AND nc.is_active = 1
+         AND cb.status != 'cancelled'
+         ${statusFilter}
+       ORDER BY j.work_date DESC, j.start_time ASC`,
+    )
+    .bind(contactFriendId)
+    .all<NurseryStaffBooking>();
+  return result.results;
+}
+
 // --- 友だちが担当する園の一覧 ---
 
 export async function getNurseriesByContact(

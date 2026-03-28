@@ -21,6 +21,7 @@ import { initAdmin } from './admin.js';
 import { initMypage } from './mypage.js';
 import { initCheckin } from './checkin.js';
 import { initReview } from './review.js';
+import { initNurseryStaff } from './nursery-staff.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -85,6 +86,7 @@ function getPage(): string | null {
   if (path === 'checkin') return 'checkin';
   if (path === 'admin') return 'admin';
   if (path === 'review') return 'review';
+  if (path === 'nursery-staff') return 'nursery-staff';
   const params = getLiffParams();
   return params.get('page');
 }
@@ -300,7 +302,9 @@ async function main() {
       return;
     }
 
-    if (page === 'jobs') {
+    if (page === 'nursery-staff') {
+      await initNurseryStaff();
+    } else if (page === 'jobs') {
       await initJobs();
     } else if (page === 'mypage') {
       await initMypage();

@@ -40,6 +40,7 @@ export type Nursery = {
   transportFee?: string | null
   breakMinutes?: number | null
   photoR2Keys?: string | null
+  photoUrls?: string[]
   isActive: boolean
   createdAt: string
   updatedAt: string
@@ -291,6 +292,21 @@ export const api = {
       }),
     removeContact: (nurseryId: string, friendId: string) =>
       fetchApi<ApiResponse<void>>(`/api/nurseries/${nurseryId}/contacts/${friendId}`, {
+        method: 'DELETE',
+      }),
+    uploadPhoto: async (nurseryId: string, file: File): Promise<ApiResponse<{ r2Key: string }>> => {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`${API_URL}/api/nurseries/${nurseryId}/photos`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
+        body: formData,
+      })
+      if (!res.ok) throw new Error(`API error: ${res.status}`)
+      return res.json()
+    },
+    deletePhoto: (nurseryId: string, fileName: string) =>
+      fetchApi<ApiResponse<void>>(`/api/nurseries/${nurseryId}/photos/${encodeURIComponent(fileName)}`, {
         method: 'DELETE',
       }),
   },

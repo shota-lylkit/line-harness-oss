@@ -20,6 +20,9 @@ const emptyForm: FormData = {
   address: '', station: '', accessInfo: '', description: '', notes: '',
 }
 
+const MAX_PHOTOS = 5
+const MIN_PHOTOS = 3
+
 export default function NurseriesPage() {
   const [nurseries, setNurseries] = useState<Nursery[]>([])
   const [loading, setLoading] = useState(true)
@@ -28,6 +31,10 @@ export default function NurseriesPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<FormData>(emptyForm)
   const [saving, setSaving] = useState(false)
+
+  // 写真管理
+  const [photoUrls, setPhotoUrls] = useState<string[]>([])
+  const [photoUploading, setPhotoUploading] = useState(false)
 
   // 担当者管理
   const [expandedNurseryId, setExpandedNurseryId] = useState<string | null>(null)
@@ -54,10 +61,11 @@ export default function NurseriesPage() {
   const openCreate = () => {
     setForm(emptyForm)
     setEditingId(null)
+    setPhotoUrls([])
     setShowForm(true)
   }
 
-  const openEdit = (nursery: Nursery) => {
+  const openEdit = async (nursery: Nursery) => {
     setForm({
       name: nursery.name,
       prefecture: nursery.prefecture || '',
@@ -71,7 +79,43 @@ export default function NurseriesPage() {
       notes: nursery.notes || '',
     })
     setEditingId(nursery.id)
+    setPhotoUrls(nursery.photoUrls || [])
     setShowForm(true)
+  }
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!editingId || !e.target.files?.length) return
+    const file = e.target.files[0]
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('JPEG, PNG, WebP のみアップロードできます')
+      return
+    }
+    setPhotoUploading(true)
+    setError('')
+    try {
+      await api.nurseries.uploadPhoto(editingId, file)
+      const res = await api.nurseries.get(editingId)
+      if (res.success) setPhotoUrls(res.data.photoUrls || [])
+    } catch {
+      setError('写真のアップロードに失敗しました')
+    } finally {
+      setPhotoUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handlePhotoDelete = async (url: string) => {
+    if (!editingId) return
+    if (!confirm('この写真を削除しますか？')) return
+    setError('')
+    try {
+      const fileName = decodeURIComponent(url.split('/').pop() || '')
+      await api.nurseries.deletePhoto(editingId, fileName)
+      const res = await api.nurseries.get(editingId)
+      if (res.success) setPhotoUrls(res.data.photoUrls || [])
+    } catch {
+      setError('写真の削除に失敗しました')
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -229,6 +273,65 @@ export default function NurseriesPage() {
               </div>
               <Field label="説明" name="description" type="textarea" />
               <Field label="備考" name="notes" type="textarea" />
+
+              {/* 写真管理セクション */}
+              {editingId ? (
+                <div className="border-t border-gray-200 pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">園の写真</label>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {photoUrls.length}/{MAX_PHOTOS}枚
+                        {photoUrls.length < MIN_PHOTOS && (
+                          <span className="text-amber-500 ml-1">（最低{MIN_PHOTOS}枚推奨）</span>
+                        )}
+                      </p>
+                    </div>
+                    {photoUrls.length < MAX_PHOTOS && (
+                      <label className="px-3 py-1.5 text-xs font-medium text-white rounded-md cursor-pointer transition-opacity hover:opacity-90"
+                        style={{ backgroundColor: '#FF6B35' }}>
+                        {photoUploading ? 'アップロード中...' : '+ 写真を追加'}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={handlePhotoUpload}
+                          disabled={photoUploading}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {photoUrls.length > 0 ? (
+                    <div className="grid grid-cols-3 gap-2">
+                      {photoUrls.map((url, i) => (
+                        <div key={i} className="relative group rounded-lg overflow-hidden border border-gray-200 aspect-[4/3]">
+                          <img src={url} alt={`園写真 ${i + 1}`} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => handlePhotoDelete(url)}
+                            className="absolute top-1 right-1 w-6 h-6 bg-black/60 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                          >
+                            ×
+                          </button>
+                          <span className="absolute bottom-1 left-1 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded">
+                            {i + 1}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center">
+                      <p className="text-sm text-gray-400">写真がまだ登録されていません</p>
+                      <p className="text-xs text-gray-300 mt-1">JPEG, PNG, WebP 対応</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="border-t border-gray-200 pt-4">
+                  <p className="text-xs text-gray-400">写真は園を登録した後に追加できます</p>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-2">
                 <button
                   type="submit"
@@ -324,6 +427,7 @@ export default function NurseriesPage() {
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">エリア</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">最寄駅</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">種別</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">写真</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</th>
                 </tr>
               </thead>
@@ -339,6 +443,16 @@ export default function NurseriesPage() {
                       <td className="px-6 py-4 text-sm text-gray-700">{n.station || '-'}</td>
                       <td className="px-6 py-4 text-sm text-gray-700">{n.nurseryType || '-'}</td>
                       <td className="px-6 py-4">
+                        {(() => {
+                          const count = (n.photoUrls || []).length
+                          return (
+                            <span className={`text-sm font-medium ${count >= MIN_PHOTOS ? 'text-green-600' : count > 0 ? 'text-amber-500' : 'text-gray-300'}`}>
+                              {count}/{MAX_PHOTOS}
+                            </span>
+                          )
+                        })()}
+                      </td>
+                      <td className="px-6 py-4">
                         <div className="flex gap-2">
                           <button onClick={() => toggleContacts(n.id)}
                             className={`text-xs hover:underline ${expandedNurseryId === n.id ? 'text-orange-600 font-medium' : 'text-gray-500'}`}>
@@ -351,7 +465,7 @@ export default function NurseriesPage() {
                     </tr>
                     {expandedNurseryId === n.id && (
                       <tr>
-                        <td colSpan={5} className="px-6 pb-4 bg-orange-50/50 border-t border-orange-100">
+                        <td colSpan={6} className="px-6 pb-4 bg-orange-50/50 border-t border-orange-100">
                           <div className="flex items-center justify-between py-3">
                             <h3 className="text-sm font-semibold text-gray-700">LINE担当者</h3>
                             <button onClick={openFriendPicker}

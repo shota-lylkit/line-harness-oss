@@ -134,6 +134,11 @@ nurseries.post('/api/nurseries/:id/photos', async (c) => {
     const nursery = await getNurseryById(c.env.DB, nurseryId);
     if (!nursery) return c.json({ success: false, error: 'Nursery not found' }, 404);
 
+    const existingKeys: string[] = JSON.parse(nursery.photo_r2_keys || '[]');
+    if (existingKeys.length >= 5) {
+      return c.json({ success: false, error: '写真は最大5枚までです' }, 400);
+    }
+
     const contentType = c.req.header('Content-Type') || '';
     const r2 = (c.env as unknown as { DOCUMENTS?: R2Bucket }).DOCUMENTS;
     if (!r2) {
@@ -168,13 +173,39 @@ nurseries.post('/api/nurseries/:id/photos', async (c) => {
     }
 
     // photo_r2_keys に追加
-    const existingKeys: string[] = JSON.parse(nursery.photo_r2_keys || '[]');
     existingKeys.push(r2Key);
     await updateNursery(c.env.DB, nurseryId, { photoR2Keys: existingKeys });
 
     return c.json({ success: true, data: { r2Key } }, 201);
   } catch (err) {
     console.error('POST /api/nurseries/:id/photos error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// ========== 園写真削除（R2から削除、管理: API_KEY認証） ==========
+
+nurseries.delete('/api/nurseries/:id/photos/:fileName', async (c) => {
+  try {
+    const nurseryId = c.req.param('id');
+    const fileName = decodeURIComponent(c.req.param('fileName'));
+    const nursery = await getNurseryById(c.env.DB, nurseryId);
+    if (!nursery) return c.json({ success: false, error: 'Nursery not found' }, 404);
+
+    const r2 = (c.env as unknown as { DOCUMENTS?: R2Bucket }).DOCUMENTS;
+    if (!r2) return c.json({ success: false, error: 'R2 not configured' }, 503);
+
+    const keys: string[] = JSON.parse(nursery.photo_r2_keys || '[]');
+    const matchKey = keys.find(k => k.endsWith(fileName));
+    if (!matchKey) return c.json({ success: false, error: 'Photo not found' }, 404);
+
+    await r2.delete(matchKey);
+    const updatedKeys = keys.filter(k => k !== matchKey);
+    await updateNursery(c.env.DB, nurseryId, { photoR2Keys: updatedKeys });
+
+    return c.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/nurseries/:id/photos error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
